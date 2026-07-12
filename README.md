@@ -1,11 +1,129 @@
-<div align="center">
+# 📊 IBM TRIRIGA Observability & Performance Copilot
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+An enterprise-grade, offline-first performance diagnostics workspace and log analyzer designed specifically for **IBM TRIRIGA** application platforms. It identifies thread pool exhaustion, JVM memory leaks, cache miss storms, and database lock contentions instantly.
 
-  <h1>Built with AI Studio</h2>
+---
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+## 🌟 GitHub Repository Details
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+### 📝 Repository Description
+> **Enterprise IBM TRIRIGA Log Analyzer** | An offline-first, zero-dependency performance diagnostics tool and telemetry dashboard. Instantly diagnose WebSphere/WebLogic JVM states, `custom.properties` cache limits, slow queries, and workflow deadlock telemetry completely in the browser on Windows, macOS, or Linux.
 
-</div>
+### 🏷️ Recommended Topics / Tags
+`ibm-tririga` · `log-analyzer` · `jvm-tuning` · `observability-dashboard` · `offline-first` · `performance-tuning` · `webcontainer-threads` · `database-locks` · `g1gc` · `devops-tool`
+
+---
+
+## 🛠️ Key Architectural Models
+
+The project is structured with two execution pathways to satisfy both extreme ease-of-use and professional production hosting:
+
+1. **Standalone Offline Tool (`TRIRIGA_Copilot_Offline.html`)**
+   * **Zero Prerequisites**: No Node.js, Python, or command line required. 
+   * **Instant Execution**: Double-click the file on Windows, macOS, or Linux to open a fully operational offline analyzer in any standard browser.
+   * **100% Secure & Private**: Your logs never leave your machine; all parsing and telemetry rendering occur locally inside your browser sandbox.
+
+2. **Full-Stack React & Vite Application**
+   * **Modern Framework**: Implemented using React 18, Vite, Tailwind CSS, and Lucide icons.
+   * **Highly Modular**: Decoupled parsing engines, dynamic metric calculations, and interactive responsive charts.
+
+---
+
+## 🚀 Execution Steps for All Operating Systems
+
+### 🔹 Pathway A: Running the Standalone Offline Tool (No Setup)
+
+This mode is designed for immediate use without installing any software or runtime libraries.
+
+#### **Windows (XP, 7, 10, 11)**
+1. **Download**: Obtain the `TRIRIGA_Copilot_Offline.html` file.
+2. **Launch**: Double-click `TRIRIGA_Copilot_Offline.html` directly from your file explorer.
+3. **Analyze**: Your default browser (Edge, Chrome, Firefox) will open. Go to the **Upload Logs** tab to drag and drop or paste your logs.
+
+#### **macOS (Intel & Apple Silicon)**
+1. **Download**: Obtain the `TRIRIGA_Copilot_Offline.html` file.
+2. **Launch**: Double-click the file, or right-click and select **Open With** → **Safari** or **Google Chrome**.
+3. **Analyze**: Drop or paste your `.log` files to run diagnostics locally.
+
+#### **Linux (Ubuntu, Fedora, Arch, etc.)**
+1. **Download**: Obtain the `TRIRIGA_Copilot_Offline.html` file.
+2. **Launch**: Double-click the file in your desktop environment (GNOME, KDE), or open it from the terminal:
+   ```bash
+   xdg-open TRIRIGA_Copilot_Offline.html
+   ```
+3. **Analyze**: Paste or load your logs to immediately visualize alerts and root causes.
+
+---
+
+### 🔸 Pathway B: Developing the React App Locally (Requires Node.js)
+
+To run, modify, or host the interactive React version:
+
+#### **Prerequisites**
+* Install **Node.js** (v18 or higher is recommended).
+
+#### **Installation & Execution Commands**
+
+```bash
+# 1. Clone your repository
+git clone https://github.com/YOUR_USERNAME/tririga-copilot.git
+cd tririga-copilot
+
+# 2. Install package dependencies
+npm install
+
+# 3. Start the local development server
+npm run dev
+
+# 4. Build the application for production deployment
+npm run build
+```
+
+*The application will boot and be accessible at `http://localhost:3000`.*
+
+---
+
+## 📊 Core Diagnostic Capabilities
+
+The engine features highly tuned, rule-based heuristics that read raw IBM TRIRIGA log blocks (including `ThreadMonitor`, `SlowQueryLogger`, `GcMonitor`, and `WorkflowQueueManager`) to analyze standard performance constraints:
+
+| Performance Issue | Triggering Indicator | Solution Recommendation |
+| :--- | :--- | :--- |
+| **CPU Starvation** | CPU Utilization > 80% with maxed thread pools. | Adjust keep-alive threads and increase maximum HTTP connector bounds. |
+| **JVM Memory Leak** | Sequential GC reclaiming < 5% of memory heap. | Switch JVM parameters to Garbage First Garbage Collector (G1GC) with custom bounds. |
+| **Cache Miss Storms** | Object Cache miss ratio exceeding 15% threshold. | Upgrade cache limit parameters (`OBJECT_CACHE_SIZE_LIMIT`) in `custom.properties`. |
+| **Workflow Deadlocks** | Asynchronous failure logs and `StateTransitionException`. | Query database for stuck processes and prevent overlapping business object execution. |
+
+---
+
+## ⚙️ IBM TRIRIGA Platform Tuning Reference
+
+For quick remediation, the application incorporates the following standardized enterprise performance parameters:
+
+### 1. JVM Garbage First GC (G1GC) Options
+Prevent prolonged Stop-The-World (STW) pauses that disrupt user requests:
+```bash
+-Xmx8g -Xms8g -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:InitiatingHeapOccupancyPercent=45
+```
+
+### 2. Object Cache Configuration (`custom.properties`)
+Optimize classification and metadata memory persistence:
+```properties
+OBJECT_CACHE_SIZE_LIMIT=100000
+GUI_CACHE_SIZE_LIMIT=15000
+METADATA_CACHE_SIZE_LIMIT=50000
+```
+
+### 3. Database Indexing Remediation (Oracle / PostgreSQL)
+Eliminate sequential table scans on core transaction structures:
+```sql
+CREATE INDEX IX_T_SPACE_ALLOCATION 
+ON T_SPACE (triSpaceTypeTX, parent_id) 
+WHERE triSpaceTypeTX IS NOT NULL;
+```
+
+---
+
+## 🔒 Security & Privacy Guarantees
+* **Local Sandboxing**: No telemetry, analytics, or log data are transmitted outside the local machine.
+* **Compliance Ready**: Completely compliant with strict enterprise healthcare, financial, and government data-privacy rules because it operates entirely client-side without cloud dependencies.

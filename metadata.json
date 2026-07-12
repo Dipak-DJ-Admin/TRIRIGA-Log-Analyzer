@@ -1,0 +1,8 @@
+{
+  "name": "TRIRIGA Observability Copilot",
+  "description": "An enterprise IBM TRIRIGA Performance Engineer and Observability Copilot to analyze platform logs, monitor telemetry thresholds, and perform root-cause analysis (RCA) on JVM leaks, cache storm events, and workflow blockages.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
