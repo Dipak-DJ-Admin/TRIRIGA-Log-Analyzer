@@ -18,28 +18,28 @@ export default function MetricCard({ title, value, subtext, metricType, metrics 
 
   switch (metricType) {
     case "cpu":
-      isAlert = metrics.cpuMax >= 80;
+      isAlert = metrics.cpuMax !== null && metrics.cpuMax >= 80;
       severity = isAlert ? "Critical" : "Normal";
       thresholdText = "Limit: 80.0%";
-      progressPercentage = metrics.cpuMax;
+      progressPercentage = metrics.cpuMax !== null ? metrics.cpuMax : 0;
       break;
     case "memory":
       isAlert = metrics.memoryLeakRisk === "High";
       severity = isAlert ? "Critical" : metrics.memoryLeakRisk === "Medium" ? "Warning" : "Normal";
       thresholdText = "Leak Risk Limit: Med";
-      progressPercentage = metrics.memoryLeakRisk === "High" ? 95 : metrics.memoryLeakRisk === "Medium" ? 60 : 25;
+      progressPercentage = metrics.memoryLeakRisk === "High" ? 95 : metrics.memoryLeakRisk === "Medium" ? 60 : metrics.memoryLeakRisk === "Unknown" ? 0 : 25;
       break;
     case "cache":
-      isAlert = metrics.cacheMissRatio > 15;
+      isAlert = metrics.cacheMissRatio !== null && metrics.cacheMissRatio > 15;
       severity = isAlert ? "Warning" : "Normal";
       thresholdText = "Warning Limit: 15.0%";
-      progressPercentage = (metrics.cacheMissRatio / 40) * 100; // Scaled to 40% max for visual bar
+      progressPercentage = metrics.cacheMissRatio !== null ? (metrics.cacheMissRatio / 40) * 100 : 0; // Scaled to 40% max for visual bar
       break;
     case "workflow":
-      isAlert = metrics.workflowFailureRate > 2;
+      isAlert = metrics.workflowFailureRate !== null && metrics.workflowFailureRate > 2;
       severity = isAlert ? "Warning" : "Normal";
       thresholdText = "Error Limit: 2.0%";
-      progressPercentage = (metrics.workflowFailureRate / 10) * 100; // Scaled to 10% max
+      progressPercentage = metrics.workflowFailureRate !== null ? (metrics.workflowFailureRate / 10) * 100 : 0; // Scaled to 10% max
       break;
   }
 

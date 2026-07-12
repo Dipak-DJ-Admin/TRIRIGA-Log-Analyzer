@@ -249,12 +249,16 @@
                 <div class="space-y-4">
                     <!-- Drag and Drop Area -->
                     <div id="drop-zone" class="border-2 border-dashed border-[#30363D] rounded-xl p-8 text-center bg-[#0D1117]/40 hover:border-blue-500/50 transition-all cursor-pointer relative">
-                        <input type="file" id="log-file-input" class="absolute inset-0 opacity-0 cursor-pointer" onchange="handleFileSelect(event)">
+                        <input type="file" id="log-file-input" class="absolute inset-0 opacity-0 cursor-pointer" multiple onchange="handleFileSelect(event)">
                         <div class="space-y-2 pointer-events-none">
                             <i data-lucide="upload-cloud" class="w-10 h-10 text-blue-500 mx-auto"></i>
-                            <p class="text-xs font-medium text-slate-300"><span class="text-blue-400 font-bold">Click to upload</span> or drag and drop your log file here</p>
-                            <p class="text-[10px] text-slate-500 font-mono">Supports .log, .txt, .xml formats (Max 15MB)</p>
+                            <p class="text-xs font-medium text-slate-300"><span class="text-blue-400 font-bold">Click to upload</span> or drag and drop multiple log files here</p>
+                            <p class="text-[10px] text-slate-500 font-mono">Supports .log, .txt, .xml, .csv files (Max 15MB each)</p>
                         </div>
+                    </div>
+
+                    <!-- List of aggregated uploaded files -->
+                    <div id="offline-uploaded-files" class="hidden bg-[#0D1117] border border-[#30363D] rounded-xl p-4 space-y-2 text-xs">
                     </div>
 
                     <div class="flex justify-between items-center pt-2">
@@ -510,63 +514,95 @@ WHERE triSpaceTypeTX IS NOT NULL;</pre>
         // Run Rule-based Local Parser (Identical to utils/logParser.ts)
         function parseLogsOffline(logText, scenarioName) {
             const text = logText.toLowerCase();
+            const isScenario = scenarioName && scenarioName !== "Manual Log Analysis";
             
             // Extract CPU data
-            let cpuMax = 45;
+            let cpuMax = null;
             const cpuMatches = logText.match(/cpu\s*[:=]\s*(\d+(\.\d+)?)%/i) || logText.match(/cpu\s+usage\s*[:=]?\s*(\d+(\.\d+)?)/i);
             if (cpuMatches) {
                 cpuMax = parseFloat(cpuMatches[1]);
-            } else if (text.includes("thread pool exhaustion") || text.includes("cpu spike") || text.includes("high-load thread")) {
-                cpuMax = 88.5;
-            } else if (scenarioName && (scenarioName.includes("CPU") || scenarioName.includes("Exhaustion"))) {
+            } else if (text.includes("thread monitor") || text.includes("cpu utilization") || text.includes("thread pool exhaustion") || text.includes("cpu spike") || text.includes("high-load thread")) {
+                const threadMonitorCpu = logText.match(/cpu\s+(?:utilization\s+)?sustained\s+at\s+(\d+(\.\d+)?)%/i);
+                if (threadMonitorCpu) {
+                    cpuMax = parseFloat(threadMonitorCpu[1]);
+                } else {
+                    cpuMax = 88.5;
+                }
+            } else if (isScenario && (scenarioName.includes("CPU") || scenarioName.includes("Exhaustion"))) {
                 cpuMax = 92.0;
             }
 
             // Extract Cache metrics
-            let cacheMisses = 120;
-            let cacheHits = 2000;
-            let cacheMissRatio = 5.6;
+            let cacheMisses = null;
+            let cacheHits = null;
+            let cacheMissRatio = null;
             const missMatches = logText.match(/miss(?:es)?\s*[:=]\s*(\d+)/i);
             const hitMatches = logText.match(/hits?\s*[:=]\s*(\d+)/i);
+            const missRatioMatches = logText.match(/miss\s+ratio\s*[:=]\s*(\d+(\.\d+)?)%/i);
+            
             if (missMatches && hitMatches) {
                 cacheMisses = parseInt(missMatches[1]);
                 cacheHits = parseInt(hitMatches[1]);
                 cacheMissRatio = (cacheMisses / (cacheHits + cacheMisses)) * 100;
-            } else if (text.includes("cache miss storm") || text.includes("cache.miss") || text.includes("objectcache")) {
-                cacheMissRatio = 26.4;
-            } else if (scenarioName && scenarioName.includes("Cache")) {
+            } else if (missRatioMatches) {
+                cacheMissRatio = parseFloat(missRatioMatches[1]);
+            } else if (text.includes("cache miss storm") || text.includes("cache.miss") || text.includes("objectcache") || text.includes("gui_cache misses")) {
+                const stormMatch = logText.match(/miss\s+ratio\s*[:=]\s*(\d+(\.\d+)?)%/i) || logText.match(/miss\s*[:=]\s*(\d+(\.\d+)?)%/i);
+                if (stormMatch) {
+                    cacheMissRatio = parseFloat(stormMatch[1]);
+                } else {
+                    cacheMissRatio = 26.4;
+                }
+            } else if (isScenario && scenarioName.includes("Cache")) {
                 cacheMissRatio = 28.5;
             }
 
             // Extract Workflow metrics
-            let totalWorkflows = 500;
-            let failedWorkflows = 4;
-            let workflowFailureRate = 0.8;
+            let totalWorkflows = null;
+            let failedWorkflows = null;
+            let workflowFailureRate = null;
             const wfProcessedMatches = logText.match(/processed\s+(\d+)\s+workflows/i) || logText.match(/total\s+processed\s+in\s+the\s+last\s+hour\s*[:=]?\s*(\d+)/i);
             const wfFailedMatches = logText.match(/(\d+)\s+failure/i) || logText.match(/(\d+)\s+failed\s+task/i);
+            
             if (wfProcessedMatches && wfFailedMatches) {
                 totalWorkflows = parseInt(wfProcessedMatches[1]);
                 failedWorkflows = parseInt(wfFailedMatches[1]);
                 workflowFailureRate = (failedWorkflows / totalWorkflows) * 100;
-            } else if (text.includes("workflow execution failure") || text.includes("statetransitionexception") || text.includes("locktimeoutexception")) {
-                totalWorkflows = 850;
-                failedWorkflows = 38;
-                workflowFailureRate = (failedWorkflows / totalWorkflows) * 100;
-            } else if (scenarioName && (scenarioName.includes("Workflow") || scenarioName.includes("Lock"))) {
+            } else if (text.includes("workflow execution failure") || text.includes("statetransitionexception") || text.includes("locktimeoutexception") || text.includes("workflow failure rates")) {
+                const wfRateMatch = logText.match(/failure\s+rates\s*[:=]\s*(\d+(\.\d+)?)%/i);
+                if (wfRateMatch) {
+                    workflowFailureRate = parseFloat(wfRateMatch[1]);
+                    totalWorkflows = 850;
+                    failedWorkflows = Math.round((workflowFailureRate / 100) * totalWorkflows);
+                } else {
+                    totalWorkflows = 850;
+                    failedWorkflows = 38;
+                    workflowFailureRate = (failedWorkflows / totalWorkflows) * 100;
+                }
+            } else if (isScenario && (scenarioName.includes("Workflow") || scenarioName.includes("Lock"))) {
                 totalWorkflows = 1200;
                 failedWorkflows = 42;
                 workflowFailureRate = 3.5;
             }
 
             // Memory Leak identification
-            let memoryTrend = "Stable";
-            let memoryLeakRisk = "Low";
-            if (text.includes("outofmemoryerror") || text.includes("gc overhead limit exceeded") || text.includes("leaked") || text.includes("heap memory non-recovering")) {
-                memoryTrend = "Upward";
-                memoryLeakRisk = "High";
-            } else if (text.includes("garbage collection") || text.includes("memory leak") || (scenarioName && (scenarioName.includes("JVM") || scenarioName.includes("Memory")))) {
-                memoryTrend = "Upward";
-                memoryLeakRisk = "High";
+            let memoryTrend = "Unknown";
+            let memoryLeakRisk = "Unknown";
+            
+            const hasMemoryKeywords = text.includes("gc") || text.includes("outofmemoryerror") || text.includes("memory") || text.includes("heap") || text.includes("allocation failure");
+            if (hasMemoryKeywords) {
+                memoryTrend = "Stable";
+                memoryLeakRisk = "Low";
+                if (text.includes("outofmemoryerror") || text.includes("gc overhead limit exceeded") || text.includes("leaked") || text.includes("heap memory non-recovering")) {
+                    memoryTrend = "Upward";
+                    memoryLeakRisk = "High";
+                } else if (text.includes("memory leak") || text.includes("garbage collection") || (isScenario && (scenarioName.includes("JVM") || scenarioName.includes("Memory")))) {
+                    memoryTrend = "Upward";
+                    memoryLeakRisk = "High";
+                }
+            } else if (isScenario) {
+                memoryTrend = "Stable";
+                memoryLeakRisk = "Low";
             }
 
             // Anomalies & Recommendations
@@ -574,7 +610,7 @@ WHERE triSpaceTypeTX IS NOT NULL;</pre>
             const recommendations = [];
             let status = "Healthy";
 
-            if (cpuMax >= 80) {
+            if (cpuMax !== null && cpuMax >= 80) {
                 status = "Critical";
                 detectedAnomalies.push({
                     title: "Critical System Constraint",
@@ -604,7 +640,7 @@ WHERE triSpaceTypeTX IS NOT NULL;</pre>
                 });
             }
 
-            if (cacheMissRatio > 15) {
+            if (cacheMissRatio !== null && cacheMissRatio > 15) {
                 if (status === "Healthy") status = "Degraded";
                 detectedAnomalies.push({
                     title: "Cache Storm Event Detected",
@@ -619,7 +655,7 @@ WHERE triSpaceTypeTX IS NOT NULL;</pre>
                 });
             }
 
-            if (workflowFailureRate > 2) {
+            if (workflowFailureRate !== null && workflowFailureRate > 2) {
                 if (status === "Healthy") status = "Degraded";
                 detectedAnomalies.push({
                     title: "Workflow Failure Operational Risk",
@@ -637,17 +673,23 @@ WHERE triSpaceTypeTX IS NOT NULL;</pre>
             // RCA Output
             let rca = "";
             let executiveSummary = "";
-            if (scenarioName && (scenarioName.includes("CPU") || cpuMax >= 80)) {
-                executiveSummary = `The TRIRIGA platform is suffering from severe CPU starvation. High active thread contention (${cpuMax.toFixed(0)}%) is caused by un-indexed SQL lookups and parallel asynchronous workflows.`;
+            const hasDetectedAnyMetrics = cpuMax !== null || cacheMissRatio !== null || workflowFailureRate !== null || memoryLeakRisk !== "Unknown";
+
+            if (!hasDetectedAnyMetrics) {
+                status = "Healthy";
+                executiveSummary = "No active performance anomalies detected. Paste or upload raw logs featuring ThreadMonitor, GcMonitor, or SlowQueryLogger entries to reconstruct full telemetry.";
+                rca = `### Telemetry Analysis: No Metrics Detected\n\n1. **No Performance Data**: The loaded log file does not contain recognized TRIRIGA performance metrics (such as CPU levels, memory trends, or cache statistics).\n2. **Monitoring Active**: Ready to analyze. Upload server.log or gc.log files containing standard WebSphere/WebLogic server warnings or G1GC garbage collection metrics to reconstruct live system telemetry.`;
+            } else if (scenarioName && (scenarioName.includes("CPU") || (cpuMax !== null && cpuMax >= 80))) {
+                executiveSummary = `The TRIRIGA platform is suffering from severe CPU starvation. High active thread contention (${cpuMax !== null ? cpuMax.toFixed(0) : "88"}%) is caused by un-indexed SQL lookups and parallel asynchronous workflows.`;
                 rca = `### Root Cause Analysis: CPU Starvation\n\n1. **Thread Saturation**: The log reveals a sudden surge of HTTP connector threads executing long-running business intelligence queries on \`T_SPACE\` and \`T_TRIORGANIZATION\`.\n2. **Slow Query Contention**: Lack of appropriate compound indices on custom business objects causes sequential table scans, utilizing over 90% of DB CPU which ripples back into the app server's WebContainer thread pool.`;
             } else if (scenarioName && (scenarioName.includes("Memory") || memoryLeakRisk === "High")) {
                 executiveSummary = "JVM memory telemetry reveals classic memory leak symptoms. Full GC cycles are happening more frequently (every 30 seconds) but recovering less than 5% of memory heap each time.";
                 rca = `### Root Cause Analysis: JVM Heap Leak\n\n1. **State Persistence**: A custom workflow is dynamically creating millions of temporary object references inside loops without explicit cleanup or deletion actions.\n2. **GC Failure**: Standard Garbage Collector is unable to reclaim memory because these references remain active inside thread-local static variables. Sustained heap utilization above 94%.`;
-            } else if (scenarioName && (scenarioName.includes("Cache") || cacheMissRatio > 15)) {
-                executiveSummary = `The Object Cache Miss Ratio is critical at ${cacheMissRatio.toFixed(1)}%. Excessive DB metadata compilation is choking the server connection pools.`;
+            } else if (scenarioName && (scenarioName.includes("Cache") || (cacheMissRatio !== null && cacheMissRatio > 15))) {
+                executiveSummary = `The Object Cache Miss Ratio is critical at ${cacheMissRatio !== null ? cacheMissRatio.toFixed(1) : "26.4"}%. Excessive DB metadata compilation is choking the server connection pools.`;
                 rca = `### Root Cause Analysis: Cache Storm Event\n\n1. **Cache Limit Overshoot**: The maximum object limit configured in \`custom.properties\` has been breached due to the heavy metadata volume of a recent lease administration bulk import.\n2. **Eviction Loop**: TRIRIGA is caught in an eviction-reload cycle, triggering constant file system I/O for cache invalidation events.`;
-            } else if (scenarioName && (scenarioName.includes("Workflow") || workflowFailureRate > 2)) {
-                executiveSummary = `Operational risk raised: ${workflowFailureRate.toFixed(1)}% workflow failures. Database records on business objects are locked due to asynchronous process collisions.`;
+            } else if (scenarioName && (scenarioName.includes("Workflow") || (workflowFailureRate !== null && workflowFailureRate > 2))) {
+                executiveSummary = `Operational risk raised: ${workflowFailureRate !== null ? workflowFailureRate.toFixed(1) : "4.5"}% workflow failures. Database records on business objects are locked due to asynchronous process collisions.`;
                 rca = `### Root Cause Analysis: Workflow Contention & Locks\n\n1. **Locking Contention**: Concurrent execution of 'triCalculateAllocation' and 'triIntegrateSpace' is causing a deadlock on the \`T_WORK_ORDER\` tables.\n2. **State Transition Defect**: Workflows are failing with \`StateTransitionException\`, leaving the business objects in an intermediate locked state, blocking downstream processes.`;
             } else {
                 executiveSummary = "Platform health is optimal. Telemetry data shows low active thread counts, solid cache hit ratio (98.4%), and normal memory recovery cycles.";
@@ -666,7 +708,7 @@ WHERE triSpaceTypeTX IS NOT NULL;</pre>
                     workflowFailureRate,
                     totalWorkflowsProcessed: totalWorkflows,
                     totalWorkflowsFailed: failedWorkflows,
-                    avgResponseTimeMs: cpuMax > 80 ? 3200 : 420
+                    avgResponseTimeMs: cpuMax !== null ? (cpuMax > 80 ? 3200 : 420) : null
                 },
                 rca,
                 recommendations
@@ -765,10 +807,26 @@ WHERE triSpaceTypeTX IS NOT NULL;</pre>
 
             // Health Score calculation
             let score = 90;
-            if (metrics.cpuMax > 80) score -= 30;
-            if (metrics.memoryLeakRisk === "High") score -= 35;
-            if (metrics.cacheMissRatio > 15) score -= 15;
-            if (metrics.workflowFailureRate > 2) score -= 15;
+            let checks = 0;
+            if (metrics.cpuMax !== null) {
+                checks++;
+                if (metrics.cpuMax >= 80) score -= 30;
+            }
+            if (metrics.memoryLeakRisk !== "Unknown") {
+                checks++;
+                if (metrics.memoryLeakRisk === "High") score -= 35;
+            }
+            if (metrics.cacheMissRatio !== null) {
+                checks++;
+                if (metrics.cacheMissRatio > 15) score -= 15;
+            }
+            if (metrics.workflowFailureRate !== null) {
+                checks++;
+                if (metrics.workflowFailureRate > 2) score -= 15;
+            }
+            if (checks === 0) {
+                score = 100; // Perfect score if no logs have active error metrics
+            }
             score = Math.max(8, score);
             
             document.getElementById("health-score-value").innerText = `${score}/100`;
@@ -788,7 +846,7 @@ WHERE triSpaceTypeTX IS NOT NULL;</pre>
             // Live SVG path points generation based on metrics
             const points = [];
             const segments = 10;
-            let peakModifier = metrics.cpuMax / 100;
+            let peakModifier = (metrics.cpuMax !== null ? metrics.cpuMax : 25) / 100;
             
             for (let i = 0; i <= segments; i++) {
                 const x = (i / segments) * 500;
@@ -815,20 +873,20 @@ WHERE triSpaceTypeTX IS NOT NULL;</pre>
                 <div class="bg-[#161B22] border border-[#30363D] p-5 rounded-2xl relative overflow-hidden group">
                     <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wider block font-mono">Max CPU Rate</span>
                     <div class="flex items-baseline gap-1 mt-2.5">
-                        <span class="text-2xl font-bold text-white font-mono">${metrics.cpuMax.toFixed(1)}%</span>
+                        <span class="text-2xl font-bold text-white font-mono">${metrics.cpuMax !== null ? metrics.cpuMax.toFixed(1) + '%' : 'N/A'}</span>
                     </div>
                     <p class="text-[10px] text-slate-400 mt-1.5 font-sans">Threshold limits: &lt; 80.0%</p>
                     <div class="absolute right-3.5 bottom-3 text-slate-700 select-none pointer-events-none group-hover:scale-110 transition-transform">
-                        <i data-lucide="activity" class="w-8 h-8 ${metrics.cpuMax >= 80 ? 'text-red-500/20' : 'text-slate-500/10'}"></i>
+                        <i data-lucide="activity" class="w-8 h-8 ${metrics.cpuMax !== null && metrics.cpuMax >= 80 ? 'text-red-500/20' : 'text-slate-500/10'}"></i>
                     </div>
                 </div>
                 <!-- JVM MEMORY -->
                 <div class="bg-[#161B22] border border-[#30363D] p-5 rounded-2xl relative overflow-hidden group">
                     <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wider block font-mono">Heap Leak Risk</span>
                     <div class="flex items-baseline gap-1 mt-2.5">
-                        <span class="text-2xl font-bold text-white font-mono">${metrics.memoryLeakRisk}</span>
+                        <span class="text-2xl font-bold text-white font-mono">${metrics.memoryLeakRisk !== "Unknown" ? metrics.memoryLeakRisk : "N/A"}</span>
                     </div>
-                    <p class="text-[10px] text-slate-400 mt-1.5 font-sans">Trend: ${metrics.memoryTrend}</p>
+                    <p class="text-[10px] text-slate-400 mt-1.5 font-sans">Trend: ${metrics.memoryTrend !== "Unknown" ? metrics.memoryTrend : "N/A"}</p>
                     <div class="absolute right-3.5 bottom-3 text-slate-700 select-none pointer-events-none group-hover:scale-110 transition-transform">
                         <i data-lucide="database" class="w-8 h-8 ${metrics.memoryLeakRisk === 'High' ? 'text-red-500/20' : 'text-slate-500/10'}"></i>
                     </div>
@@ -837,22 +895,22 @@ WHERE triSpaceTypeTX IS NOT NULL;</pre>
                 <div class="bg-[#161B22] border border-[#30363D] p-5 rounded-2xl relative overflow-hidden group">
                     <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wider block font-mono">Cache Miss Rate</span>
                     <div class="flex items-baseline gap-1 mt-2.5">
-                        <span class="text-2xl font-bold text-white font-mono">${metrics.cacheMissRatio.toFixed(1)}%</span>
+                        <span class="text-2xl font-bold text-white font-mono">${metrics.cacheMissRatio !== null ? metrics.cacheMissRatio.toFixed(1) + '%' : 'N/A'}</span>
                     </div>
                     <p class="text-[10px] text-slate-400 mt-1.5 font-sans">Threshold limits: &lt; 15.0%</p>
                     <div class="absolute right-3.5 bottom-3 text-slate-700 select-none pointer-events-none group-hover:scale-110 transition-transform">
-                        <i data-lucide="sliders" class="w-8 h-8 ${metrics.cacheMissRatio > 15 ? 'text-amber-500/20' : 'text-slate-500/10'}"></i>
+                        <i data-lucide="sliders" class="w-8 h-8 ${metrics.cacheMissRatio !== null && metrics.cacheMissRatio > 15 ? 'text-amber-500/20' : 'text-slate-500/10'}"></i>
                     </div>
                 </div>
                 <!-- WORKFLOW ERROR -->
                 <div class="bg-[#161B22] border border-[#30363D] p-5 rounded-2xl relative overflow-hidden group">
                     <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wider block font-mono">Workflow Failures</span>
                     <div class="flex items-baseline gap-1 mt-2.5">
-                        <span class="text-2xl font-bold text-white font-mono">${metrics.workflowFailureRate.toFixed(2)}%</span>
+                        <span class="text-2xl font-bold text-white font-mono">${metrics.workflowFailureRate !== null ? metrics.workflowFailureRate.toFixed(2) + '%' : 'N/A'}</span>
                     </div>
-                    <p class="text-[10px] text-slate-400 mt-1.5 font-sans">${metrics.totalWorkflowsFailed} of ${metrics.totalWorkflowsProcessed} processes</p>
+                    <p class="text-[10px] text-slate-400 mt-1.5 font-sans">${metrics.workflowFailureRate !== null ? `${metrics.totalWorkflowsFailed} of ${metrics.totalWorkflowsProcessed} processes` : 'No workflow logs'}</p>
                     <div class="absolute right-3.5 bottom-3 text-slate-700 select-none pointer-events-none group-hover:scale-110 transition-transform">
-                        <i data-lucide="terminal" class="w-8 h-8 ${metrics.workflowFailureRate > 2 ? 'text-amber-500/20' : 'text-slate-500/10'}"></i>
+                        <i data-lucide="terminal" class="w-8 h-8 ${metrics.workflowFailureRate !== null && metrics.workflowFailureRate > 2 ? 'text-amber-500/20' : 'text-slate-500/10'}"></i>
                     </div>
                 </div>
             `;
@@ -966,15 +1024,55 @@ WHERE triSpaceTypeTX IS NOT NULL;</pre>
             }
         }
 
+        // Global Offline Files State
+        let offlineFiles = [];
+
+        function renderOfflineUploadedFiles() {
+            const container = document.getElementById("offline-uploaded-files");
+            if (!container) return;
+            
+            if (offlineFiles.length === 0) {
+                container.classList.add("hidden");
+                container.innerHTML = "";
+                return;
+            }
+            
+            container.classList.remove("hidden");
+            container.innerHTML = `
+                <div class="flex justify-between items-center pb-2 border-b border-[#30363D]">
+                    <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wide">
+                        Aggregated Log Files (${offlineFiles.length})
+                    </span>
+                    <button onclick="clearOfflineFiles()" class="text-[10px] font-semibold text-rose-400 hover:text-rose-300 flex items-center gap-1 cursor-pointer">
+                        Clear All Uploads
+                    </button>
+                </div>
+                <div class="max-h-28 overflow-y-auto space-y-1 mt-1.5 pr-1 font-mono text-[10px]">
+                    ${offlineFiles.map((f, idx) => `
+                        <div class="flex justify-between items-center bg-[#161B22] p-2 rounded border border-[#30363D]/50 text-slate-300">
+                            <span class="truncate max-w-[250px]">${f.name}</span>
+                            <span class="text-slate-500 font-bold">${(f.size / 1024).toFixed(1)} KB</span>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        function clearOfflineFiles() {
+            offlineFiles = [];
+            renderOfflineUploadedFiles();
+            document.getElementById("log-textarea").value = "";
+        }
+
         // Manual log analyzer execution
         function clearTextBuffer() {
-            document.getElementById("log-textarea").value = "";
+            clearOfflineFiles();
         }
 
         function analyzePastedLog() {
             const logText = document.getElementById("log-textarea").value;
             if (!logText.trim()) {
-                alert("Please paste some server logs first!");
+                alert("Please paste some server logs or upload files first!");
                 return;
             }
             runAnalysis(logText, "Manual Log Analysis");
@@ -983,22 +1081,39 @@ WHERE triSpaceTypeTX IS NOT NULL;</pre>
 
         // Drag and Drop files handling
         function handleFileSelect(event) {
-            const file = event.target.files[0];
-            if (file) {
-                readLogFile(file);
+            const files = event.target.files;
+            if (files && files.length > 0) {
+                readMultipleFiles(files);
             }
         }
 
-        function readLogFile(file) {
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const logText = e.target.result;
-                document.getElementById("log-textarea").value = logText;
-                alert(`Loaded file: ${file.name} successfully. Starting offline evaluation...`);
-                runAnalysis(logText, file.name);
-                switchTab("Dashboard");
-            };
-            reader.readAsText(file);
+        function readMultipleFiles(fileList) {
+            const filesArray = Array.from(fileList);
+            // Append newly uploaded files to state
+            offlineFiles = [...offlineFiles, ...filesArray];
+            renderOfflineUploadedFiles();
+            
+            let combinedText = "";
+            let filesReadCount = 0;
+            
+            filesArray.forEach(file => {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    combinedText += `\n=== LOG SOURCE: ${file.name} ===\n` + e.target.result;
+                    filesReadCount++;
+                    
+                    if (filesReadCount === filesArray.length) {
+                        const currentText = document.getElementById("log-textarea").value;
+                        const mergedText = (currentText ? currentText + "\n" : "") + combinedText;
+                        document.getElementById("log-textarea").value = mergedText;
+                        
+                        // Automatically start evaluation
+                        runAnalysis(mergedText, `${offlineFiles.length} Aggregated Files`);
+                        switchTab("Dashboard");
+                    }
+                };
+                reader.readAsText(file);
+            });
         }
 
         // File drop listener setups
@@ -1014,9 +1129,9 @@ WHERE triSpaceTypeTX IS NOT NULL;</pre>
             dropZone.addEventListener("drop", (e) => {
                 e.preventDefault();
                 dropZone.classList.remove("border-blue-500", "bg-blue-950/10");
-                const file = e.dataTransfer.files[0];
-                if (file) {
-                    readLogFile(file);
+                const files = e.dataTransfer.files;
+                if (files && files.length > 0) {
+                    readMultipleFiles(files);
                 }
             });
         }

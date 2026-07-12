@@ -12,14 +12,14 @@ export interface Recommendation {
 }
 
 export interface PlatformMetrics {
-  cpuMax: number;
-  memoryTrend: "Stable" | "Upward" | "Downward" | "Fluctuating";
-  memoryLeakRisk: "Low" | "Medium" | "High";
-  cacheMissRatio: number;
-  workflowFailureRate: number;
-  totalWorkflowsProcessed: number;
-  totalWorkflowsFailed: number;
-  avgResponseTimeMs: number;
+  cpuMax: number | null;
+  memoryTrend: "Stable" | "Upward" | "Downward" | "Fluctuating" | "Unknown";
+  memoryLeakRisk: "Low" | "Medium" | "High" | "Unknown";
+  cacheMissRatio: number | null;
+  workflowFailureRate: number | null;
+  totalWorkflowsProcessed: number | null;
+  totalWorkflowsFailed: number | null;
+  avgResponseTimeMs: number | null;
 }
 
 export interface CopilotAnalysis {

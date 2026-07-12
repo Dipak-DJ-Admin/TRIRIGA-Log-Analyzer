@@ -2,63 +2,95 @@ import { CopilotAnalysis, Anomaly, Recommendation } from "../types";
 
 export function parseLogsLocally(logText: string, scenarioName?: string): CopilotAnalysis {
   const text = logText.toLowerCase();
+  const isScenario = scenarioName && scenarioName !== "Manual log upload";
   
   // Extract CPU data
-  let cpuMax = 45;
+  let cpuMax: number | null = null;
   const cpuMatches = logText.match(/cpu\s*[:=]\s*(\d+(\.\d+)?)%/i) || logText.match(/cpu\s+usage\s*[:=]?\s*(\d+(\.\d+)?)/i);
   if (cpuMatches) {
     cpuMax = parseFloat(cpuMatches[1]);
-  } else if (text.includes("thread pool exhaustion") || text.includes("cpu spike") || text.includes("high-load thread")) {
-    cpuMax = 88.5;
-  } else if (scenarioName?.includes("CPU") || scenarioName?.includes("Exhaustion")) {
+  } else if (text.includes("thread monitor") || text.includes("cpu utilization") || text.includes("thread pool exhaustion") || text.includes("cpu spike") || text.includes("high-load thread")) {
+    const threadMonitorCpu = logText.match(/cpu\s+(?:utilization\s+)?sustained\s+at\s+(\d+(\.\d+)?)%/i);
+    if (threadMonitorCpu) {
+      cpuMax = parseFloat(threadMonitorCpu[1]);
+    } else {
+      cpuMax = 88.5; // default fallback if cpu words present
+    }
+  } else if (isScenario && (scenarioName?.includes("CPU") || scenarioName?.includes("Exhaustion"))) {
     cpuMax = 92.0;
   }
 
   // Extract Cache metrics
-  let cacheMisses = 120;
-  let cacheHits = 2000;
-  let cacheMissRatio = 5.6;
+  let cacheMisses: number | null = null;
+  let cacheHits: number | null = null;
+  let cacheMissRatio: number | null = null;
   const missMatches = logText.match(/miss(?:es)?\s*[:=]\s*(\d+)/i);
   const hitMatches = logText.match(/hits?\s*[:=]\s*(\d+)/i);
+  const missRatioMatches = logText.match(/miss\s+ratio\s*[:=]\s*(\d+(\.\d+)?)%/i);
+  
   if (missMatches && hitMatches) {
     cacheMisses = parseInt(missMatches[1]);
     cacheHits = parseInt(hitMatches[1]);
     cacheMissRatio = (cacheMisses / (cacheHits + cacheMisses)) * 100;
-  } else if (text.includes("cache miss storm") || text.includes("cache.miss") || text.includes("objectcache")) {
-    cacheMissRatio = 26.4;
-  } else if (scenarioName?.includes("Cache")) {
+  } else if (missRatioMatches) {
+    cacheMissRatio = parseFloat(missRatioMatches[1]);
+  } else if (text.includes("cache miss storm") || text.includes("cache.miss") || text.includes("objectcache") || text.includes("gui_cache misses")) {
+    const stormMatch = logText.match(/miss\s+ratio\s*[:=]\s*(\d+(\.\d+)?)%/i) || logText.match(/miss\s*[:=]\s*(\d+(\.\d+)?)%/i);
+    if (stormMatch) {
+      cacheMissRatio = parseFloat(stormMatch[1]);
+    } else {
+      cacheMissRatio = 26.4;
+    }
+  } else if (isScenario && scenarioName?.includes("Cache")) {
     cacheMissRatio = 28.5;
   }
 
   // Extract Workflow metrics
-  let totalWorkflows = 500;
-  let failedWorkflows = 4;
-  let workflowFailureRate = 0.8;
+  let totalWorkflows: number | null = null;
+  let failedWorkflows: number | null = null;
+  let workflowFailureRate: number | null = null;
   const wfProcessedMatches = logText.match(/processed\s+(\d+)\s+workflows/i) || logText.match(/total\s+processed\s+in\s+the\s+last\s+hour\s*[:=]?\s*(\d+)/i);
   const wfFailedMatches = logText.match(/(\d+)\s+failure/i) || logText.match(/(\d+)\s+failed\s+task/i);
+  
   if (wfProcessedMatches && wfFailedMatches) {
     totalWorkflows = parseInt(wfProcessedMatches[1]);
     failedWorkflows = parseInt(wfFailedMatches[1]);
     workflowFailureRate = (failedWorkflows / totalWorkflows) * 100;
-  } else if (text.includes("workflow execution failure") || text.includes("statetransitionexception") || text.includes("locktimeoutexception")) {
-    totalWorkflows = 850;
-    failedWorkflows = 38;
-    workflowFailureRate = (failedWorkflows / totalWorkflows) * 100; // 4.47%
-  } else if (scenarioName?.includes("Workflow") || scenarioName?.includes("Lock")) {
+  } else if (text.includes("workflow execution failure") || text.includes("statetransitionexception") || text.includes("locktimeoutexception") || text.includes("workflow failure rates")) {
+    const wfRateMatch = logText.match(/failure\s+rates\s*[:=]\s*(\d+(\.\d+)?)%/i);
+    if (wfRateMatch) {
+      workflowFailureRate = parseFloat(wfRateMatch[1]);
+      totalWorkflows = 850;
+      failedWorkflows = Math.round((workflowFailureRate / 100) * totalWorkflows);
+    } else {
+      totalWorkflows = 850;
+      failedWorkflows = 38;
+      workflowFailureRate = (failedWorkflows / totalWorkflows) * 100; // 4.47%
+    }
+  } else if (isScenario && (scenarioName?.includes("Workflow") || scenarioName?.includes("Lock"))) {
     totalWorkflows = 1200;
     failedWorkflows = 42;
     workflowFailureRate = 3.5;
   }
 
   // Memory Leak identification
-  let memoryTrend: "Stable" | "Upward" | "Downward" | "Fluctuating" = "Stable";
-  let memoryLeakRisk: "Low" | "Medium" | "High" = "Low";
-  if (text.includes("outofmemoryerror") || text.includes("gc overhead limit exceeded") || text.includes("leaked") || text.includes("heap memory non-recovering")) {
-    memoryTrend = "Upward";
-    memoryLeakRisk = "High";
-  } else if (text.includes("garbage collection") || text.includes("memory leak") || scenarioName?.includes("JVM") || scenarioName?.includes("Memory")) {
-    memoryTrend = "Upward";
-    memoryLeakRisk = "High";
+  let memoryTrend: "Stable" | "Upward" | "Downward" | "Fluctuating" | "Unknown" = "Unknown";
+  let memoryLeakRisk: "Low" | "Medium" | "High" | "Unknown" = "Unknown";
+  
+  const hasMemoryKeywords = text.includes("gc") || text.includes("outofmemoryerror") || text.includes("memory") || text.includes("heap") || text.includes("allocation failure");
+  if (hasMemoryKeywords) {
+    memoryTrend = "Stable";
+    memoryLeakRisk = "Low";
+    if (text.includes("outofmemoryerror") || text.includes("gc overhead limit exceeded") || text.includes("leaked") || text.includes("heap memory non-recovering")) {
+      memoryTrend = "Upward";
+      memoryLeakRisk = "High";
+    } else if (text.includes("memory leak") || text.includes("garbage collection") || (isScenario && (scenarioName?.includes("JVM") || scenarioName?.includes("Memory")))) {
+      memoryTrend = "Upward";
+      memoryLeakRisk = "High";
+    }
+  } else if (isScenario) {
+    memoryTrend = "Stable";
+    memoryLeakRisk = "Low";
   }
 
   // Create Anomaly items based on thresholds
@@ -67,7 +99,7 @@ export function parseLogsLocally(logText: string, scenarioName?: string): Copilo
   let status: "Healthy" | "Degraded" | "Critical" = "Healthy";
 
   // Check CPU Threshold > 80%
-  if (cpuMax >= 80) {
+  if (cpuMax !== null && cpuMax >= 80) {
     status = "Critical";
     detectedAnomalies.push({
       title: "Critical System Constraint",
@@ -99,7 +131,7 @@ export function parseLogsLocally(logText: string, scenarioName?: string): Copilo
   }
 
   // Check Cache Miss Ratio > 15%
-  if (cacheMissRatio > 15) {
+  if (cacheMissRatio !== null && cacheMissRatio > 15) {
     if (status === "Healthy") status = "Degraded";
     detectedAnomalies.push({
       title: "Cache Storm Event Detected",
@@ -115,7 +147,7 @@ export function parseLogsLocally(logText: string, scenarioName?: string): Copilo
   }
 
   // Check Workflow Failure Rates > 2%
-  if (workflowFailureRate > 2) {
+  if (workflowFailureRate !== null && workflowFailureRate > 2) {
     if (status === "Healthy") status = "Degraded";
     detectedAnomalies.push({
       title: "Workflow Failure Operational Risk",
@@ -133,17 +165,24 @@ export function parseLogsLocally(logText: string, scenarioName?: string): Copilo
   // Provide realistic custom RCA based on text
   let rca = "";
   let executiveSummary = "";
-  if (scenarioName?.includes("CPU") || cpuMax >= 80) {
-    executiveSummary = `The TRIRIGA platform is suffering from severe CPU starvation. High active thread contention (${cpuMax.toFixed(0)}%) is caused by un-indexed SQL lookups and parallel asynchronous workflows.`;
+
+  const hasDetectedAnyMetrics = cpuMax !== null || cacheMissRatio !== null || workflowFailureRate !== null || memoryLeakRisk !== "Unknown";
+
+  if (!hasDetectedAnyMetrics) {
+    status = "Healthy";
+    executiveSummary = "No active performance anomalies detected. Paste or upload raw logs featuring ThreadMonitor, GcMonitor, or SlowQueryLogger entries to reconstruct full telemetry.";
+    rca = `### Telemetry Analysis: No Metrics Detected\n\n1. **No Performance Data**: The loaded log file does not contain recognized TRIRIGA performance metrics (such as CPU levels, memory trends, or cache statistics).\n2. **Monitoring Active**: Ready to analyze. Upload server.log or gc.log files containing standard WebSphere/WebLogic server warnings or G1GC garbage collection metrics to reconstruct live system telemetry.`;
+  } else if (scenarioName?.includes("CPU") || (cpuMax !== null && cpuMax >= 80)) {
+    executiveSummary = `The TRIRIGA platform is suffering from severe CPU starvation. High active thread contention (${cpuMax !== null ? cpuMax.toFixed(0) : "88"}%) is caused by un-indexed SQL lookups and parallel asynchronous workflows.`;
     rca = `### Root Cause Analysis: CPU Starvation\n\n1. **Thread Saturation**: The log reveals a sudden surge of HTTP connector threads executing long-running business intelligence queries on \`T_SPACE\` and \`T_TRIORGANIZATION\`.\n2. **Slow Query Contention**: Lack of appropriate compound indices on custom business objects causes sequential table scans, utilizing over 90% of DB CPU which ripples back into the app server's WebContainer thread pool.`;
   } else if (scenarioName?.includes("Memory") || memoryLeakRisk === "High") {
     executiveSummary = "JVM memory telemetry reveals classic memory leak symptoms. Full GC cycles are happening more frequently (every 30 seconds) but recovering less than 5% of memory heap each time.";
     rca = `### Root Cause Analysis: JVM Heap Leak\n\n1. **State Persistence**: A custom workflow is dynamically creating millions of temporary object references inside loops without explicit cleanup or deletion actions.\n2. **GC Failure**: Standard Garbage Collector is unable to reclaim memory because these references remain active inside thread-local static variables. Sustained heap utilization above 94%.`;
-  } else if (scenarioName?.includes("Cache") || cacheMissRatio > 15) {
-    executiveSummary = `The Object Cache Miss Ratio is critical at ${cacheMissRatio.toFixed(1)}%. Excessive DB metadata compilation is choking the server connection pools.`;
+  } else if (scenarioName?.includes("Cache") || (cacheMissRatio !== null && cacheMissRatio > 15)) {
+    executiveSummary = `The Object Cache Miss Ratio is critical at ${cacheMissRatio !== null ? cacheMissRatio.toFixed(1) : "26.4"}%. Excessive DB metadata compilation is choking the server connection pools.`;
     rca = `### Root Cause Analysis: Cache Storm Event\n\n1. **Cache Limit Overshoot**: The maximum object limit configured in \`custom.properties\` has been breached due to the heavy metadata volume of a recent lease administration bulk import.\n2. **Eviction Loop**: TRIRIGA is caught in an eviction-reload cycle, triggering constant file system I/O for cache invalidation events.`;
-  } else if (scenarioName?.includes("Workflow") || workflowFailureRate > 2) {
-    executiveSummary = `Operational risk raised: ${workflowFailureRate.toFixed(1)}% workflow failures. Database records on business objects are locked due to asynchronous process collisions.`;
+  } else if (scenarioName?.includes("Workflow") || (workflowFailureRate !== null && workflowFailureRate > 2)) {
+    executiveSummary = `Operational risk raised: ${workflowFailureRate !== null ? workflowFailureRate.toFixed(1) : "4.5"}% workflow failures. Database records on business objects are locked due to asynchronous process collisions.`;
     rca = `### Root Cause Analysis: Workflow Contention & Locks\n\n1. **Locking Contention**: Concurrent execution of 'triCalculateAllocation' and 'triIntegrateSpace' is causing a deadlock on the \`T_WORK_ORDER\` tables.\n2. **State Transition Defect**: Workflows are failing with \`StateTransitionException\`, leaving the business objects in an intermediate locked state, blocking downstream processes.`;
   } else {
     executiveSummary = "Platform health is optimal. Telemetry data shows low active thread counts, solid cache hit ratio (98.4%), and normal memory recovery cycles.";
@@ -151,7 +190,6 @@ export function parseLogsLocally(logText: string, scenarioName?: string): Copilo
   }
 
   return {
-    isAI: false,
     status,
     executiveSummary,
     detectedAnomalies,
@@ -163,7 +201,7 @@ export function parseLogsLocally(logText: string, scenarioName?: string): Copilo
       workflowFailureRate,
       totalWorkflowsProcessed: totalWorkflows,
       totalWorkflowsFailed: failedWorkflows,
-      avgResponseTimeMs: cpuMax > 80 ? 3200 : 420
+      avgResponseTimeMs: cpuMax !== null ? (cpuMax > 80 ? 3200 : 420) : null
     },
     rca,
     recommendations
