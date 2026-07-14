@@ -27,6 +27,13 @@ interface PlatformMetrics {
   avgResponseTimeMs: number | null;
 }
 
+interface EventTrace {
+  timestamp: string;
+  level: "INFO" | "WARN" | "ERROR" | "DEBUG";
+  source: string;
+  message: string;
+}
+
 interface CLIAnalysisResult {
   fileName: string;
   fileSizeMB: number;
@@ -37,6 +44,7 @@ interface CLIAnalysisResult {
   metrics: PlatformMetrics;
   rca: string;
   recommendations: Recommendation[];
+  events: EventTrace[];
 }
 
 // ANSI Escape sequences for premium Linux console formatting
@@ -107,9 +115,40 @@ async function analyzeFileStream(filePath: string): Promise<CLIAnalysisResult> {
   const gcPauseRegex = /gc\s+pause\s*(?:\([^)]+\))?\s*(\d+(?:\.\d+)?)\s*ms/i;
   const gcTimeRegex = /pause\s+(?:\([^)]+\)\s+)?(\d+(?:\.\d+)?)\s*s/i;
 
+  const events: EventTrace[] = [];
+  const logHeaderRegex = /^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:,\d{3})?)\s+(INFO|WARN|ERROR|DEBUG|SEVERE)\s+\[([^\]]+)\]\s+(.*)$/;
+
   for await (const line of rl) {
     lineCount++;
     const lowerLine = line.toLowerCase();
+
+    // Parse structured log event
+    if (events.length < 20000) {
+      const match = line.match(logHeaderRegex);
+      if (match) {
+        events.push({
+          timestamp: match[1],
+          level: (match[2] === "SEVERE" ? "ERROR" : match[2]) as any,
+          source: match[3],
+          message: match[4]
+        });
+      } else {
+        const timestampMatch = line.match(/^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/);
+        if (timestampMatch) {
+          const level = lowerLine.includes("error") || lowerLine.includes("severe") || lowerLine.includes("exception") 
+            ? "ERROR" 
+            : lowerLine.includes("warn") || lowerLine.includes("alert") 
+            ? "WARN" 
+            : "INFO";
+          events.push({
+            timestamp: timestampMatch[1],
+            level,
+            source: "System",
+            message: line.substring(timestampMatch[1].length).trim()
+          });
+        }
+      }
+    }
 
     // Check log level counts
     if (lowerLine.includes("error") || lowerLine.includes("severe") || lowerLine.includes("exception")) {
@@ -325,6 +364,7 @@ async function analyzeFileStream(filePath: string): Promise<CLIAnalysisResult> {
     },
     rca,
     recommendations,
+    events,
   };
 }
 
@@ -482,6 +522,46 @@ ${colors.bold}Capabilities:${colors.reset}
     console.log(`${colors.bgGreen}${colors.bold} SUCCESS ${colors.reset} Detailed cluster diagnostics written to: ${colors.bold}${colors.green}${reportPath}${colors.reset}\n`);
   } catch (err: any) {
     console.error(`${colors.red}Failed to export markdown report: ${err.message}${colors.reset}\n`);
+  }
+
+  // Export a consolidated JSON Report
+  const jsonReportPath = path.join(process.cwd(), "tririga-analysis-report.json");
+  try {
+    // Exclude full event arrays from main JSON summary if too long, or keep a small subset
+    const exportResults = results.map(r => ({
+      ...r,
+      events: r.events.slice(0, 100) // Keep a sample of 100 in the JSON summary to prevent file size explosion
+    }));
+    fs.writeFileSync(jsonReportPath, JSON.stringify(exportResults, null, 2), "utf-8");
+    console.log(`${colors.bgGreen}${colors.bold} SUCCESS ${colors.reset} Detailed JSON diagnostics written to: ${colors.bold}${colors.green}${jsonReportPath}${colors.reset}\n`);
+  } catch (err: any) {
+    console.error(`${colors.red}Failed to export JSON report: ${err.message}${colors.reset}\n`);
+  }
+
+  // Export a combined CSV Chronological event trace
+  const csvReportPath = path.join(process.cwd(), "tririga-trace-timeline.csv");
+  try {
+    let csvContent = "Timestamp,Level,SourceNode,Component,Message\n";
+    const combinedEvents = results.flatMap(r =>
+      r.events.map(ev => ({
+        ...ev,
+        nodeOrigin: r.fileName
+      }))
+    ).sort((a, b) => (a.timestamp || "").localeCompare(b.timestamp || ""));
+
+    combinedEvents.forEach((ev) => {
+      const ts = `"${(ev.timestamp || "").replace(/"/g, '""')}"`;
+      const lvl = `"${(ev.level || "").replace(/"/g, '""')}"`;
+      const node = `"${(ev.nodeOrigin || "").replace(/"/g, '""')}"`;
+      const src = `"${(ev.source || "").replace(/"/g, '""')}"`;
+      const msg = `"${(ev.message || "").replace(/"/g, '""')}"`;
+      csvContent += `${ts},${lvl},${node},${src},${msg}\n`;
+    });
+
+    fs.writeFileSync(csvReportPath, csvContent, "utf-8");
+    console.log(`${colors.bgGreen}${colors.bold} SUCCESS ${colors.reset} Detailed Chronological Trace CSV written to: ${colors.bold}${colors.green}${csvReportPath}${colors.reset}\n`);
+  } catch (err: any) {
+    console.error(`${colors.red}Failed to export CSV trace: ${err.message}${colors.reset}\n`);
   }
 }
 

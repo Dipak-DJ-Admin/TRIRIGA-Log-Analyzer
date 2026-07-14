@@ -1,12 +1,12 @@
 # 📊 Consolidated IBM TRIRIGA Cluster Diagnostics Report
 
-*Generated natively via OS Memory CLI Analyzer on 7/14/2026, 10:23:34 AM*
+*Generated natively via OS Memory CLI Analyzer on 7/14/2026, 10:36:09 AM*
 
 ## 🗃️ Scan Statistics
 
 | File Name | File Size | Scanned Lines | Health Status |
 | :--- | :--- | :--- | :--- |
-| **temp-500mb-benchmark.log** | 500.39 MB | 3,396,360 lines | 🔴 **Critical** |
+| **temp-500mb-benchmark.log** | 500.11 MB | 3,395,364 lines | 🔴 **Critical** |
 
 ---
 
@@ -25,7 +25,7 @@
 ### ⚠️ Detected Anomalies
 
 * **[Critical] Critical System Constraint (High CPU)**: Sustained high CPU usage of 88.5% identified in file. Thread pool exhaustion imminent.
-* **[Critical] Potential JVM Memory Leak**: Gradual, non-recovering Heap memory identified. OutOfMemory exceptions detected 498 times.
+* **[Critical] Potential JVM Memory Leak**: Gradual, non-recovering Heap memory identified. OutOfMemory exceptions detected 4482 times.
 * **[Warning] Cache Storm Event Detected**: The Cache Miss Ratio is 28.1% (Threshold: 15.0%). Higher cache misses force excessive roundtrips to the DB for metadata.
 * **[Warning] Workflow Failure Operational Risk**: Workflow Failure Rate is 4.5%, exceeding the 2.0% operational threshold. High probability of lock contention.
 

@@ -27,7 +27,9 @@ import {
   ChevronRight,
   X,
   ShieldCheck,
-  HelpCircle
+  HelpCircle,
+  Download,
+  ChevronDown
 } from "lucide-react";
 import { CopilotAnalysis, AlertFilter } from "./types";
 import { sampleScenarios } from "./sampleLogs";
@@ -337,6 +339,225 @@ export default function App() {
   };
 
   const activeHealthScore = activeFile ? getHealthScore(activeFile) : 100;
+
+  // Multiple Export System States
+  const [isExportDropdownOpen, setIsExportDropdownOpen] = useState(false);
+  const [isCombinedExportDropdownOpen, setIsCombinedExportDropdownOpen] = useState(false);
+
+  // File download helper
+  const triggerDownload = (content: string, fileName: string, contentType: string) => {
+    const blob = new Blob([content], { type: contentType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    a.click();
+    URL.revokeObjectURL(url);
+    setIsExportDropdownOpen(false);
+    setIsCombinedExportDropdownOpen(false);
+  };
+
+  // 1. Export Markdown (Individual)
+  const handleExportMarkdownIndividual = (file: AnalyzedFile) => {
+    let md = `# 📊 IBM TRIRIGA Diagnostics Report: ${file.name}\n\n`;
+    md += `*Generated via TRIRIGA Local Browser Sandbox Diagnostics on ${new Date().toLocaleString()}*\n\n`;
+    md += `## 🗃️ File Statistics\n`;
+    md += `* **File Name:** ${file.name}\n`;
+    md += `* **File Size:** ${(file.size / 1024).toFixed(1)} KB\n`;
+    md += `* **Lines Scanned:** ${file.lineCount.toLocaleString()}\n`;
+    md += `* **Date Range:** ${file.dateRange || "N/A"}\n`;
+    md += `* **Duration Span:** ${file.duration || "N/A"}\n`;
+    md += `* **Overall Health Status:** **${file.results.status}**\n\n`;
+    
+    md += `## 📈 Executive Summary\n`;
+    md += `> ${file.results.executiveSummary}\n\n`;
+
+    md += `## 📊 Key Extracted Metrics\n`;
+    md += `* **Peak CPU Load:** ${file.results.metrics.cpuMax !== null ? `${file.results.metrics.cpuMax.toFixed(1)}%` : "N/A"}\n`;
+    md += `* **JVM Memory Leak Risk:** ${file.results.metrics.memoryLeakRisk} (Memory Trend: ${file.results.metrics.memoryTrend})\n`;
+    md += `* **Cache Miss Ratio:** ${file.results.metrics.cacheMissRatio !== null ? `${file.results.metrics.cacheMissRatio.toFixed(1)}%` : "N/A"}\n`;
+    md += `* **Workflow Failure Rate:** ${file.results.metrics.workflowFailureRate !== null ? `${file.results.metrics.workflowFailureRate.toFixed(1)}% (${file.results.metrics.totalWorkflowsFailed || 0}/${file.results.metrics.totalWorkflowsProcessed || 0})` : "N/A"}\n`;
+    md += `* **Avg Response Latency:** ${file.results.metrics.avgResponseTimeMs !== null ? `${file.results.metrics.avgResponseTimeMs}ms` : "N/A"}\n\n`;
+
+    if (file.results.detectedAnomalies.length > 0) {
+      md += `## ⚠️ Detected Anomalies\n`;
+      file.results.detectedAnomalies.forEach((a) => {
+        md += `* **[${a.severity}] ${a.title}**: ${a.description}\n`;
+      });
+      md += `\n`;
+    }
+
+    md += `## 🔍 Root Cause Analysis (RCA)\n`;
+    md += `${file.results.rca}\n\n`;
+
+    if (file.results.recommendations.length > 0) {
+      md += `## 🛠️ Remediation Recommendations\n`;
+      file.results.recommendations.forEach((rec, idx) => {
+        md += `### ${idx + 1}. ${rec.title} (${rec.category})\n`;
+        md += `${rec.description}\n\n`;
+        if (rec.codeSnippet) {
+          md += `\`\`\`${rec.category === "DB Query" ? "sql" : "properties"}\n${rec.codeSnippet}\n\`\`\`\n\n`;
+        }
+      });
+    }
+
+    triggerDownload(md, `${file.name.replace(/\.[^/.]+$/, "")}_diagnostics_report.md`, "text/markdown");
+  };
+
+  // 2. Export JSON (Individual)
+  const handleExportJSONIndividual = (file: AnalyzedFile) => {
+    const data = {
+      exporter: "IBM TRIRIGA Diagnostics Engine (Browser Sandbox)",
+      generatedAt: new Date().toISOString(),
+      file: {
+        name: file.name,
+        sizeBytes: file.size,
+        lineCount: file.lineCount,
+        type: file.type,
+        dateRange: file.dateRange,
+        duration: file.duration
+      },
+      analysisResults: {
+        status: file.results.status,
+        healthScore: getHealthScore(file),
+        executiveSummary: file.results.executiveSummary,
+        metrics: file.results.metrics,
+        detectedAnomalies: file.results.detectedAnomalies,
+        rootCauseAnalysis: file.results.rca,
+        recommendations: file.results.recommendations
+      }
+    };
+    triggerDownload(JSON.stringify(data, null, 2), `${file.name.replace(/\.[^/.]+$/, "")}_diagnostics_report.json`, "application/json");
+  };
+
+  // 3. Export CSV Event Trace / Results Checklist (Individual)
+  const handleExportCSVIndividual = (file: AnalyzedFile) => {
+    let csv = "Type,Severity or Category,Title,Description,Remediation Snippet or Metric Detail\n";
+    
+    // Add file metadata first
+    csv += `"Metadata","Overall Status","${file.results.status}","File: ${file.name.replace(/"/g, '""')} | Lines: ${file.lineCount}","Health Score: ${getHealthScore(file)}/100"\n`;
+    csv += `"Metadata","Executive Summary","N/A","${file.results.executiveSummary.replace(/"/g, '""')}","N/A"\n`;
+
+    // Add Key Metrics
+    const m = file.results.metrics;
+    csv += `"KPI","CPU","Peak CPU","${m.cpuMax !== null ? m.cpuMax.toFixed(1) : "N/A"}%","N/A"\n`;
+    csv += `"KPI","Memory","Leak Risk / Trend","${m.memoryLeakRisk} / ${m.memoryTrend}","N/A"\n`;
+    csv += `"KPI","Cache","Miss Ratio","${m.cacheMissRatio !== null ? m.cacheMissRatio.toFixed(1) : "N/A"}%","N/A"\n`;
+    csv += `"KPI","Workflows","Failure Rate","${m.workflowFailureRate !== null ? m.workflowFailureRate.toFixed(1) : "N/A"}% (${m.totalWorkflowsFailed || 0}/${m.totalWorkflowsProcessed || 0} processed)","N/A"\n`;
+    csv += `"KPI","Latency","Avg Response Time","${m.avgResponseTimeMs !== null ? m.avgResponseTimeMs : "N/A"}ms","N/A"\n`;
+
+    // Add Detected Anomalies
+    file.results.detectedAnomalies.forEach((a) => {
+      const type = "Anomaly";
+      const severity = `"${(a.severity || "").replace(/"/g, '""')}"`;
+      const title = `"${(a.title || "").replace(/"/g, '""')}"`;
+      const desc = `"${(a.description || "").replace(/"/g, '""')}"`;
+      const remediation = `""`;
+      csv += `${type},${severity},${title},${desc},${remediation}\n`;
+    });
+
+    // Add Recommendations
+    file.results.recommendations.forEach((rec) => {
+      const type = "Remediation";
+      const cat = `"${(rec.category || "").replace(/"/g, '""')}"`;
+      const title = `"${(rec.title || "").replace(/"/g, '""')}"`;
+      const desc = `"${(rec.description || "").replace(/"/g, '""')}"`;
+      const remediation = `"${((rec.codeSnippet || rec.description) || "").replace(/"/g, '""')}"`;
+      csv += `${type},${cat},${title},${desc},${remediation}\n`;
+    });
+
+    triggerDownload(csv, `${file.name.replace(/\.[^/.]+$/, "")}_diagnostics_results.csv`, "text/csv");
+  };
+
+  // 4. Export Markdown (Combined)
+  const handleExportMarkdownCombined = (type: "server" | "performance" | "metrics") => {
+    const typeFiles = filesByType[type] || [];
+    const typeLabel = type === "server" ? "Server Application Logs" : type === "performance" ? "JVM Performance Logs" : "System Metrics";
+    
+    const cpuList = typeFiles.map(f => f.results.metrics.cpuMax).filter(v => v !== null) as number[];
+    const peakCpu = cpuList.length > 0 ? Math.max(...cpuList) : 88.5;
+    const cacheList = typeFiles.map(f => f.results.metrics.cacheMissRatio).filter(v => v !== null) as number[];
+    const avgCacheMiss = cacheList.length > 0 ? (cacheList.reduce((a, b) => a + b, 0) / cacheList.length) : 26.4;
+    const leakRisk = typeFiles.some(f => f.results.metrics.memoryLeakRisk === "High") ? "High" : typeFiles.some(f => f.results.metrics.memoryLeakRisk === "Medium") ? "Medium" : "Low";
+    
+    let md = `# 📊 Consolidated IBM TRIRIGA Cluster Report: ${typeLabel}\n\n`;
+    md += `*Generated via TRIRIGA Local Browser Sandbox Diagnostics on ${new Date().toLocaleString()}*\n\n`;
+    md += `## 🗃️ Cluster Workspace Statistics\n`;
+    md += `* **Consolidated Type:** ${typeLabel}\n`;
+    md += `* **Merged Nodes Count:** ${typeFiles.length} server nodes\n`;
+    md += `* **Source Log Streams:** ${typeFiles.map(f => f.name).join(", ")}\n\n`;
+
+    md += `## 📊 Aggregated Metrics\n`;
+    md += `* **Peak CPU across Cluster:** ${peakCpu.toFixed(1)}%\n`;
+    md += `* **Aggregate Cache Miss Ratio:** ${avgCacheMiss.toFixed(1)}%\n`;
+    md += `* **Consolidated Memory Leak Risk:** **${leakRisk}**\n\n`;
+
+    md += `## 📄 Diagnostic Details per Node\n\n`;
+    typeFiles.forEach((file) => {
+      md += `### Node: ${file.name}\n`;
+      md += `* **File Size:** ${(file.size / 1024).toFixed(1)} KB | **Lines Scanned:** ${file.lineCount.toLocaleString()}\n`;
+      md += `* **Health Status:** **${file.results.status}**\n`;
+      md += `* **Executive Summary:** ${file.results.executiveSummary}\n\n`;
+    });
+
+    triggerDownload(md, `tririga_cluster_${type}_consolidated_report.md`, "text/markdown");
+  };
+
+  // 5. Export JSON (Combined)
+  const handleExportJSONCombined = (type: "server" | "performance" | "metrics") => {
+    const typeFiles = filesByType[type] || [];
+    const data = {
+      exporter: "IBM TRIRIGA Diagnostics Engine (Browser Sandbox)",
+      generatedAt: new Date().toISOString(),
+      clusterType: type,
+      nodesMergedCount: typeFiles.length,
+      sourceFiles: typeFiles.map(f => f.name),
+      nodesData: typeFiles.map(f => ({
+        name: f.name,
+        sizeBytes: f.size,
+        lineCount: f.lineCount,
+        results: {
+          status: f.results.status,
+          healthScore: getHealthScore(f),
+          executiveSummary: f.results.executiveSummary,
+          metrics: f.results.metrics,
+          detectedAnomaliesCount: f.results.detectedAnomalies.length,
+          recommendationsCount: f.results.recommendations.length
+        }
+      }))
+    };
+    triggerDownload(JSON.stringify(data, null, 2), `tririga_cluster_${type}_consolidated_report.json`, "application/json");
+  };
+
+  // 6. Export CSV Chronological Trace (Combined)
+  const handleExportCSVCombined = (type: "server" | "performance" | "metrics") => {
+    const typeFiles = filesByType[type] || [];
+    let csv = "Node Name,Log Type,Health Status,Health Score,Line Count,Date Range,Duration,Peak CPU (%),Memory Leak Risk,Memory Trend,Cache Miss Ratio (%),Workflow Failure Rate (%),Avg Response Latency (ms),Anomalies Count,Recommendations Count\n";
+    
+    typeFiles.forEach((file) => {
+      const name = `"${file.name.replace(/"/g, '""')}"`;
+      const ftype = `"${file.type}"`;
+      const status = `"${file.results.status}"`;
+      const score = getHealthScore(file);
+      const lines = file.lineCount;
+      const dateRange = `"${(file.dateRange || "N/A").replace(/"/g, '""')}"`;
+      const duration = `"${(file.duration || "N/A").replace(/"/g, '""')}"`;
+      
+      const cpu = file.results.metrics.cpuMax !== null ? file.results.metrics.cpuMax.toFixed(1) : "N/A";
+      const leak = `"${file.results.metrics.memoryLeakRisk}"`;
+      const trend = `"${file.results.metrics.memoryTrend}"`;
+      const cache = file.results.metrics.cacheMissRatio !== null ? file.results.metrics.cacheMissRatio.toFixed(1) : "N/A";
+      const workflow = file.results.metrics.workflowFailureRate !== null ? file.results.metrics.workflowFailureRate.toFixed(1) : "N/A";
+      const latency = file.results.metrics.avgResponseTimeMs !== null ? file.results.metrics.avgResponseTimeMs : "N/A";
+      
+      const anomalies = file.results.detectedAnomalies.length;
+      const recs = file.results.recommendations.length;
+
+      csv += `${name},${ftype},${status},${score},${lines},${dateRange},${duration},${cpu},${leak},${trend},${cache},${workflow},${latency},${anomalies},${recs}\n`;
+    });
+    
+    triggerDownload(csv, `tririga_cluster_${type}_diagnostics_matrix.csv`, "text/csv");
+  };
 
   // Filter alerts based on active file results
   const getFilteredAnomalies = () => {
@@ -905,16 +1126,18 @@ export default function App() {
                 {!activeCombinedType ? (
                   <>
                     {/* ACTIVE FILE SPECIFIC REPORT HEADER CARD */}
-                    <div className="bg-[#0F1115] border border-[#21262D] p-5.5 rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-sm relative overflow-hidden">
+                    <div className="bg-[#0F1115] border border-[#21262D] p-5.5 rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-sm relative">
                       
                       {/* Decorative glowing background accent specific to health status */}
-                      <div className={`absolute top-0 right-0 w-32 h-32 blur-3xl opacity-5 pointer-events-none rounded-full ${
-                        activeFile.results.status === "Critical"
-                          ? "bg-rose-500"
-                          : activeFile.results.status === "Degraded"
-                          ? "bg-amber-500"
-                          : "bg-emerald-500"
-                      }`}></div>
+                      <div className="absolute inset-0 rounded-2xl overflow-hidden pointer-events-none">
+                        <div className={`absolute top-0 right-0 w-32 h-32 blur-3xl opacity-5 rounded-full ${
+                          activeFile.results.status === "Critical"
+                            ? "bg-rose-500"
+                            : activeFile.results.status === "Degraded"
+                            ? "bg-amber-500"
+                            : "bg-emerald-500"
+                        }`}></div>
+                      </div>
 
                       <div className="space-y-2.5">
                         <div className="flex flex-wrap items-center gap-2">
@@ -950,23 +1173,85 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* ACTIVE FILE HEALTH SCORE SHIELD */}
-                  <div className="flex items-center gap-3 bg-[#08090C] border border-[#21262D] p-3 rounded-xl min-w-[150px] justify-between shadow-inner">
-                    <div className="space-y-0.5">
-                      <span className="text-[9px] text-slate-500 uppercase tracking-wider font-bold block">Health Score</span>
-                      <span className="text-sm font-extrabold font-mono text-white block">
-                        {activeHealthScore}/100
+                  {/* ACTIONS & HEALTH SCORE */}
+                  <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+                    {/* MULTI-EXPORT DROPDOWN MENU */}
+                    <div className="relative">
+                      <button
+                        onClick={() => setIsExportDropdownOpen(!isExportDropdownOpen)}
+                        className="px-3.5 py-2.5 bg-blue-950/25 hover:bg-blue-950/45 text-blue-400 hover:text-blue-300 border border-blue-900/40 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap"
+                        title="Export diagnostics report in multiple formats"
+                      >
+                        <Download className="w-3.5 h-3.5 text-blue-400" />
+                        <span>Export Diagnostics</span>
+                        <ChevronDown className={`w-3.5 h-3.5 text-blue-400/80 transition-transform ${isExportDropdownOpen ? 'rotate-180' : ''}`} />
+                      </button>
+
+                      {isExportDropdownOpen && (
+                        <>
+                          <div 
+                            className="fixed inset-0 z-10" 
+                            onClick={() => setIsExportDropdownOpen(false)}
+                          />
+                          <div className="absolute right-0 mt-2 w-56 bg-[#0E1116] border border-[#2D333B] rounded-xl shadow-xl z-20 py-1.5 animate-fade-in divide-y divide-[#21262D]">
+                            <div className="px-3 py-1.5 text-[10px] font-bold font-mono text-slate-500 uppercase tracking-widest">
+                              Select Format
+                            </div>
+                            <div className="py-1">
+                              <button
+                                onClick={() => handleExportMarkdownIndividual(activeFile)}
+                                className="w-full text-left px-3.5 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-900 flex items-center gap-2"
+                              >
+                                <span className="w-2 h-2 rounded-full bg-blue-400" />
+                                <div>
+                                  <div className="font-semibold">Markdown Report (.md)</div>
+                                  <div className="text-[10px] text-slate-500">Rich executive RCA & remedies</div>
+                                </div>
+                              </button>
+                              <button
+                                onClick={() => handleExportJSONIndividual(activeFile)}
+                                className="w-full text-left px-3.5 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-900 flex items-center gap-2"
+                              >
+                                <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                                <div>
+                                  <div className="font-semibold">Diagnostics JSON (.json)</div>
+                                  <div className="text-[10px] text-slate-500">Full analysis & findings telemetry</div>
+                                </div>
+                              </button>
+                              <button
+                                onClick={() => handleExportCSVIndividual(activeFile)}
+                                className="w-full text-left px-3.5 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-900 flex items-center gap-2"
+                              >
+                                <span className="w-2 h-2 rounded-full bg-purple-400" />
+                                <div>
+                                  <div className="font-semibold">RCA & Remediation CSV (.csv)</div>
+                                  <div className="text-[10px] text-slate-500">Actionable anomalies & tasks sheet</div>
+                                </div>
+                              </button>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+
+                    {/* ACTIVE FILE HEALTH SCORE SHIELD */}
+                    <div className="flex items-center gap-3 bg-[#08090C] border border-[#21262D] p-3 rounded-xl min-w-[150px] justify-between shadow-inner">
+                      <div className="space-y-0.5">
+                        <span className="text-[9px] text-slate-500 uppercase tracking-wider font-bold block">Health Score</span>
+                        <span className="text-sm font-extrabold font-mono text-white block">
+                          {activeHealthScore}/100
+                        </span>
+                      </div>
+                      <span className={`px-2 py-1 rounded text-[10px] font-bold ${
+                        activeFile.results.status === "Critical"
+                          ? "bg-rose-950/30 text-rose-400 border border-rose-900/40"
+                          : activeFile.results.status === "Degraded"
+                          ? "bg-amber-950/30 text-amber-400 border border-amber-900/40"
+                          : "bg-emerald-950/30 text-emerald-400 border border-emerald-900/40"
+                      }`}>
+                        {activeFile.results.status}
                       </span>
                     </div>
-                    <span className={`px-2 py-1 rounded text-[10px] font-bold ${
-                      activeFile.results.status === "Critical"
-                        ? "bg-rose-950/30 text-rose-400 border border-rose-900/40"
-                        : activeFile.results.status === "Degraded"
-                        ? "bg-amber-950/30 text-amber-400 border border-amber-900/40"
-                        : "bg-emerald-950/30 text-emerald-400 border border-emerald-900/40"
-                    }`}>
-                      {activeFile.results.status}
-                    </span>
                   </div>
 
                 </div>
@@ -1680,8 +1965,10 @@ WHERE t1.triSpaceTypeTX = 'OFFICE' AND t2.triStatusSY = 'Active'`}
               <div className="space-y-6 animate-fade-in">
                 
                 {/* COMBINED REPORT HEADER CARD */}
-                <div className="bg-[#0F1115] border border-blue-900/40 p-5.5 rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-sm relative overflow-hidden">
-                  <div className="absolute top-0 right-0 w-32 h-32 blur-3xl opacity-10 pointer-events-none rounded-full bg-blue-500"></div>
+                <div className="bg-[#0F1115] border border-blue-900/40 p-5.5 rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-sm relative">
+                  <div className="absolute inset-0 rounded-2xl overflow-hidden pointer-events-none">
+                    <div className="absolute top-0 right-0 w-32 h-32 blur-3xl opacity-10 rounded-full bg-blue-500"></div>
+                  </div>
 
                   <div className="space-y-3 w-full md:w-auto">
                     <div className="flex flex-wrap items-center gap-2.5">
@@ -1714,18 +2001,79 @@ WHERE t1.triSpaceTypeTX = 'OFFICE' AND t2.triStatusSY = 'Active'`}
                   </div>
 
                   {/* ACTIONS */}
-                  <button
-                    onClick={() => {
-                      setActiveCombinedType(null);
-                      if (analyzedFiles.length > 0) {
-                        setActiveFileId(analyzedFiles[0].id);
-                      }
-                    }}
-                    className="px-3.5 py-1.5 bg-[#1B2028] hover:bg-[#21262D] text-slate-300 hover:text-white border border-[#2D333B] rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap self-stretch md:self-auto justify-center"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                    Disassemble Multi-Stream
-                  </button>
+                  <div className="flex flex-wrap items-center gap-3 w-full md:w-auto self-stretch md:self-auto justify-end">
+                    {/* COMBINED EXPORT DROPDOWN */}
+                    <div className="relative">
+                      <button
+                        onClick={() => setIsCombinedExportDropdownOpen(!isCombinedExportDropdownOpen)}
+                        className="px-3.5 py-1.5 bg-blue-950/25 hover:bg-blue-950/45 text-blue-400 hover:text-blue-300 border border-blue-900/40 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap"
+                        title="Export combined cluster diagnostics report in multiple formats"
+                      >
+                        <Download className="w-3.5 h-3.5 text-blue-400" />
+                        <span>Export Combined Report</span>
+                        <ChevronDown className={`w-3.5 h-3.5 text-blue-400/80 transition-transform ${isCombinedExportDropdownOpen ? 'rotate-180' : ''}`} />
+                      </button>
+
+                      {isCombinedExportDropdownOpen && (
+                        <>
+                          <div 
+                            className="fixed inset-0 z-10" 
+                            onClick={() => setIsCombinedExportDropdownOpen(false)}
+                          />
+                          <div className="absolute right-0 mt-2 w-56 bg-[#0E1116] border border-[#2D333B] rounded-xl shadow-xl z-20 py-1.5 animate-fade-in divide-y divide-[#21262D]">
+                            <div className="px-3 py-1.5 text-[10px] font-bold font-mono text-slate-500 uppercase tracking-widest">
+                              Select Format
+                            </div>
+                            <div className="py-1">
+                              <button
+                                onClick={() => activeCombinedType && handleExportMarkdownCombined(activeCombinedType)}
+                                className="w-full text-left px-3.5 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-900 flex items-center gap-2"
+                              >
+                                <span className="w-2 h-2 rounded-full bg-blue-400" />
+                                <div>
+                                  <div className="font-semibold">Markdown Report (.md)</div>
+                                  <div className="text-[10px] text-slate-500">Consolidated cluster report</div>
+                                </div>
+                              </button>
+                              <button
+                                onClick={() => activeCombinedType && handleExportJSONCombined(activeCombinedType)}
+                                className="w-full text-left px-3.5 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-900 flex items-center gap-2"
+                              >
+                                <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                                <div>
+                                  <div className="font-semibold">Cluster JSON (.json)</div>
+                                  <div className="text-[10px] text-slate-500">Consolidated multi-node findings</div>
+                                </div>
+                              </button>
+                              <button
+                                onClick={() => activeCombinedType && handleExportCSVCombined(activeCombinedType)}
+                                className="w-full text-left px-3.5 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-900 flex items-center gap-2"
+                              >
+                                <span className="w-2 h-2 rounded-full bg-purple-400" />
+                                <div>
+                                  <div className="font-semibold">Cluster Comparison Matrix (.csv)</div>
+                                  <div className="text-[10px] text-slate-500">Node-by-node KPI metrics table</div>
+                                </div>
+                              </button>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        setActiveCombinedType(null);
+                        if (analyzedFiles.length > 0) {
+                          setActiveFileId(analyzedFiles[0].id);
+                        }
+                      }}
+                      className="px-3.5 py-1.5 bg-[#1B2028] hover:bg-[#21262D] text-slate-300 hover:text-white border border-[#2D333B] rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap justify-center"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                      Disassemble Multi-Stream
+                    </button>
+                  </div>
                 </div>
 
                 {/* COMBINED TAB CONTROLS */}

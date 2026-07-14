@@ -1,0 +1,670 @@
+[
+  {
+    "fileName": "temp-500mb-benchmark.log",
+    "fileSizeMB": 500.10583877563477,
+    "lineCount": 3395364,
+    "status": "Critical",
+    "executiveSummary": "The TRIRIGA server logs suffer from severe CPU starvation. High thread contention (88.5%) is indicated.",
+    "detectedAnomalies": [
+      {
+        "title": "Critical System Constraint (High CPU)",
+        "severity": "Critical",
+        "description": "Sustained high CPU usage of 88.5% identified in file. Thread pool exhaustion imminent."
+      },
+      {
+        "title": "Potential JVM Memory Leak",
+        "severity": "Critical",
+        "description": "Gradual, non-recovering Heap memory identified. OutOfMemory exceptions detected 4482 times."
+      },
+      {
+        "title": "Cache Storm Event Detected",
+        "severity": "Warning",
+        "description": "The Cache Miss Ratio is 28.1% (Threshold: 15.0%). Higher cache misses force excessive roundtrips to the DB for metadata."
+      },
+      {
+        "title": "Workflow Failure Operational Risk",
+        "severity": "Warning",
+        "description": "Workflow Failure Rate is 4.5%, exceeding the 2.0% operational threshold. High probability of lock contention."
+      }
+    ],
+    "metrics": {
+      "cpuMax": 88.5,
+      "memoryTrend": "Upward",
+      "memoryLeakRisk": "High",
+      "cacheMissRatio": 28.1,
+      "workflowFailureRate": 4.47,
+      "totalWorkflowsProcessed": 850,
+      "totalWorkflowsFailed": 38,
+      "avgResponseTimeMs": 3200
+    },
+    "rca": "### Root Cause Analysis: CPU Starvation\n\n1. **Thread Saturation**: The log reveals a sudden surge of HTTP connector threads executing long-running business intelligence queries.\n2. **Slow Query Contention**: Lack of appropriate compound indices on custom business objects causes sequential table scans, utilizing over 90% of DB CPU.",
+    "recommendations": [
+      {
+        "title": "Thread Pool Scaling & Keep-Alive Settings",
+        "category": "Property Edit",
+        "description": "Scale maximum WebSphere/WebLogic application server thread pools and optimize TRIRIGA connection pool. Set Keep-Alive limits correctly in TRIRIGAWEB.properties.",
+        "codeSnippet": "# custom.properties / TRIRIGAWEB.properties\nTHREADS_LIMIT=250\nCONNECTION_POOL_MAX=150"
+      },
+      {
+        "title": "JVM Garbage Collection Tuning & Heap Dump Analysis",
+        "category": "Workflow Adjustment",
+        "description": "Configure the JVM to use G1GC garbage collector with optimized pause time targets and generate a heap dump upon OutOfMemory exception for Eclipse Memory Analyzer (MAT).",
+        "codeSnippet": "-XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:+HeapDumpOnOutOfMemoryError"
+      },
+      {
+        "title": "TRIRIGA Object Cache Adjustments",
+        "category": "Property Edit",
+        "description": "Increase the TRIRIGA Object Cache limits in custom.properties to store frequently hit records (such as Classifications, GUI, and Web Page metadata).",
+        "codeSnippet": "# custom.properties\nOBJECT_CACHE_SIZE_LIMIT=50000\nCLEANUP_PERIOD_MINUTES=120"
+      },
+      {
+        "title": "Workflow Lock Contention & Business Object Checks",
+        "category": "DB Query",
+        "description": "Run diagnostic queries to check for locked objects in the workflow queue. Identify workflows with 'Start No Import' or stuck 'In Progress' states.",
+        "codeSnippet": "-- Run on TRIRIGA Database (PostgreSQL/Oracle/MSSQL)\nSELECT EVENT_ID, EVENT_NAME, WF_STATUS, CREATED_DATE \nFROM WF_EVENT_HISTORY \nWHERE WF_STATUS = 'LOCKED' OR WF_STATUS = 'FAILED';"
+      }
+    ],
+    "events": [
+      {
+        "timestamp": "2026-07-14 03:00:03,890",
+        "level": "INFO",
+        "source": "com.tririga.platform.query.QueryService",
+        "message": "(Default Executor-thread-5) Executing BO query: queryName=triProperty_triLookup, count=125."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:02,456",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.workflow.WorkflowAgent",
+        "message": "(WorkflowAgent-thread-2) Processing event queue item: EVENT_ID=49202, STATE=Start."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:01,124",
+        "level": "INFO",
+        "source": "com.tririga.platform.metadata.MetadataService",
+        "message": "(Default Executor-thread-1) Loading Classifications metadata for cache refresh."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:02,456",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.workflow.WorkflowAgent",
+        "message": "(WorkflowAgent-thread-2) Processing event queue item: EVENT_ID=49202, STATE=Start."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:06,128",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.cache.ObjectCache",
+        "message": "(Default Executor-thread-3) Cache hit on class loader cache reference."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:01,124",
+        "level": "INFO",
+        "source": "com.tririga.platform.metadata.MetadataService",
+        "message": "(Default Executor-thread-1) Loading Classifications metadata for cache refresh."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:02,456",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.workflow.WorkflowAgent",
+        "message": "(WorkflowAgent-thread-2) Processing event queue item: EVENT_ID=49202, STATE=Start."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:05,012",
+        "level": "INFO",
+        "source": "com.tririga.platform.event.EventAgent",
+        "message": "(EventAgent-thread-1) Heartbeat check: Platform agent is active and listening."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:01,124",
+        "level": "INFO",
+        "source": "com.tririga.platform.metadata.MetadataService",
+        "message": "(Default Executor-thread-1) Loading Classifications metadata for cache refresh."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:01,124",
+        "level": "INFO",
+        "source": "com.tririga.platform.metadata.MetadataService",
+        "message": "(Default Executor-thread-1) Loading Classifications metadata for cache refresh."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:01,124",
+        "level": "INFO",
+        "source": "com.tririga.platform.metadata.MetadataService",
+        "message": "(Default Executor-thread-1) Loading Classifications metadata for cache refresh."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:02,456",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.workflow.WorkflowAgent",
+        "message": "(WorkflowAgent-thread-2) Processing event queue item: EVENT_ID=49202, STATE=Start."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:03,890",
+        "level": "INFO",
+        "source": "com.tririga.platform.query.QueryService",
+        "message": "(Default Executor-thread-5) Executing BO query: queryName=triProperty_triLookup, count=125."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:05,012",
+        "level": "INFO",
+        "source": "com.tririga.platform.event.EventAgent",
+        "message": "(EventAgent-thread-1) Heartbeat check: Platform agent is active and listening."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:05,012",
+        "level": "INFO",
+        "source": "com.tririga.platform.event.EventAgent",
+        "message": "(EventAgent-thread-1) Heartbeat check: Platform agent is active and listening."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:03,890",
+        "level": "INFO",
+        "source": "com.tririga.platform.query.QueryService",
+        "message": "(Default Executor-thread-5) Executing BO query: queryName=triProperty_triLookup, count=125."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:05,012",
+        "level": "INFO",
+        "source": "com.tririga.platform.event.EventAgent",
+        "message": "(EventAgent-thread-1) Heartbeat check: Platform agent is active and listening."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:02,456",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.workflow.WorkflowAgent",
+        "message": "(WorkflowAgent-thread-2) Processing event queue item: EVENT_ID=49202, STATE=Start."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:05,012",
+        "level": "INFO",
+        "source": "com.tririga.platform.event.EventAgent",
+        "message": "(EventAgent-thread-1) Heartbeat check: Platform agent is active and listening."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:03,890",
+        "level": "INFO",
+        "source": "com.tririga.platform.query.QueryService",
+        "message": "(Default Executor-thread-5) Executing BO query: queryName=triProperty_triLookup, count=125."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:02,456",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.workflow.WorkflowAgent",
+        "message": "(WorkflowAgent-thread-2) Processing event queue item: EVENT_ID=49202, STATE=Start."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:02,456",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.workflow.WorkflowAgent",
+        "message": "(WorkflowAgent-thread-2) Processing event queue item: EVENT_ID=49202, STATE=Start."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:03,890",
+        "level": "INFO",
+        "source": "com.tririga.platform.query.QueryService",
+        "message": "(Default Executor-thread-5) Executing BO query: queryName=triProperty_triLookup, count=125."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:01,124",
+        "level": "INFO",
+        "source": "com.tririga.platform.metadata.MetadataService",
+        "message": "(Default Executor-thread-1) Loading Classifications metadata for cache refresh."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:06,128",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.cache.ObjectCache",
+        "message": "(Default Executor-thread-3) Cache hit on class loader cache reference."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:03,890",
+        "level": "INFO",
+        "source": "com.tririga.platform.query.QueryService",
+        "message": "(Default Executor-thread-5) Executing BO query: queryName=triProperty_triLookup, count=125."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:06,128",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.cache.ObjectCache",
+        "message": "(Default Executor-thread-3) Cache hit on class loader cache reference."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:06,128",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.cache.ObjectCache",
+        "message": "(Default Executor-thread-3) Cache hit on class loader cache reference."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:03,890",
+        "level": "INFO",
+        "source": "com.tririga.platform.query.QueryService",
+        "message": "(Default Executor-thread-5) Executing BO query: queryName=triProperty_triLookup, count=125."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:01,124",
+        "level": "INFO",
+        "source": "com.tririga.platform.metadata.MetadataService",
+        "message": "(Default Executor-thread-1) Loading Classifications metadata for cache refresh."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:03,890",
+        "level": "INFO",
+        "source": "com.tririga.platform.query.QueryService",
+        "message": "(Default Executor-thread-5) Executing BO query: queryName=triProperty_triLookup, count=125."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:01,124",
+        "level": "INFO",
+        "source": "com.tririga.platform.metadata.MetadataService",
+        "message": "(Default Executor-thread-1) Loading Classifications metadata for cache refresh."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:05,012",
+        "level": "INFO",
+        "source": "com.tririga.platform.event.EventAgent",
+        "message": "(EventAgent-thread-1) Heartbeat check: Platform agent is active and listening."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:03,890",
+        "level": "INFO",
+        "source": "com.tririga.platform.query.QueryService",
+        "message": "(Default Executor-thread-5) Executing BO query: queryName=triProperty_triLookup, count=125."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:06,128",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.cache.ObjectCache",
+        "message": "(Default Executor-thread-3) Cache hit on class loader cache reference."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:01,124",
+        "level": "INFO",
+        "source": "com.tririga.platform.metadata.MetadataService",
+        "message": "(Default Executor-thread-1) Loading Classifications metadata for cache refresh."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:03,890",
+        "level": "INFO",
+        "source": "com.tririga.platform.query.QueryService",
+        "message": "(Default Executor-thread-5) Executing BO query: queryName=triProperty_triLookup, count=125."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:03,890",
+        "level": "INFO",
+        "source": "com.tririga.platform.query.QueryService",
+        "message": "(Default Executor-thread-5) Executing BO query: queryName=triProperty_triLookup, count=125."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:01,124",
+        "level": "INFO",
+        "source": "com.tririga.platform.metadata.MetadataService",
+        "message": "(Default Executor-thread-1) Loading Classifications metadata for cache refresh."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:01,124",
+        "level": "INFO",
+        "source": "com.tririga.platform.metadata.MetadataService",
+        "message": "(Default Executor-thread-1) Loading Classifications metadata for cache refresh."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:03,890",
+        "level": "INFO",
+        "source": "com.tririga.platform.query.QueryService",
+        "message": "(Default Executor-thread-5) Executing BO query: queryName=triProperty_triLookup, count=125."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:02,456",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.workflow.WorkflowAgent",
+        "message": "(WorkflowAgent-thread-2) Processing event queue item: EVENT_ID=49202, STATE=Start."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:03,890",
+        "level": "INFO",
+        "source": "com.tririga.platform.query.QueryService",
+        "message": "(Default Executor-thread-5) Executing BO query: queryName=triProperty_triLookup, count=125."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:05,012",
+        "level": "INFO",
+        "source": "com.tririga.platform.event.EventAgent",
+        "message": "(EventAgent-thread-1) Heartbeat check: Platform agent is active and listening."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:05,012",
+        "level": "INFO",
+        "source": "com.tririga.platform.event.EventAgent",
+        "message": "(EventAgent-thread-1) Heartbeat check: Platform agent is active and listening."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:02,456",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.workflow.WorkflowAgent",
+        "message": "(WorkflowAgent-thread-2) Processing event queue item: EVENT_ID=49202, STATE=Start."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:06,128",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.cache.ObjectCache",
+        "message": "(Default Executor-thread-3) Cache hit on class loader cache reference."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:02,456",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.workflow.WorkflowAgent",
+        "message": "(WorkflowAgent-thread-2) Processing event queue item: EVENT_ID=49202, STATE=Start."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:06,128",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.cache.ObjectCache",
+        "message": "(Default Executor-thread-3) Cache hit on class loader cache reference."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:05,012",
+        "level": "INFO",
+        "source": "com.tririga.platform.event.EventAgent",
+        "message": "(EventAgent-thread-1) Heartbeat check: Platform agent is active and listening."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:05,012",
+        "level": "INFO",
+        "source": "com.tririga.platform.event.EventAgent",
+        "message": "(EventAgent-thread-1) Heartbeat check: Platform agent is active and listening."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:02,456",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.workflow.WorkflowAgent",
+        "message": "(WorkflowAgent-thread-2) Processing event queue item: EVENT_ID=49202, STATE=Start."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:02,456",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.workflow.WorkflowAgent",
+        "message": "(WorkflowAgent-thread-2) Processing event queue item: EVENT_ID=49202, STATE=Start."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:06,128",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.cache.ObjectCache",
+        "message": "(Default Executor-thread-3) Cache hit on class loader cache reference."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:02,456",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.workflow.WorkflowAgent",
+        "message": "(WorkflowAgent-thread-2) Processing event queue item: EVENT_ID=49202, STATE=Start."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:02,456",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.workflow.WorkflowAgent",
+        "message": "(WorkflowAgent-thread-2) Processing event queue item: EVENT_ID=49202, STATE=Start."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:05,012",
+        "level": "INFO",
+        "source": "com.tririga.platform.event.EventAgent",
+        "message": "(EventAgent-thread-1) Heartbeat check: Platform agent is active and listening."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:06,128",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.cache.ObjectCache",
+        "message": "(Default Executor-thread-3) Cache hit on class loader cache reference."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:06,128",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.cache.ObjectCache",
+        "message": "(Default Executor-thread-3) Cache hit on class loader cache reference."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:05,012",
+        "level": "INFO",
+        "source": "com.tririga.platform.event.EventAgent",
+        "message": "(EventAgent-thread-1) Heartbeat check: Platform agent is active and listening."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:05,012",
+        "level": "INFO",
+        "source": "com.tririga.platform.event.EventAgent",
+        "message": "(EventAgent-thread-1) Heartbeat check: Platform agent is active and listening."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:02,456",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.workflow.WorkflowAgent",
+        "message": "(WorkflowAgent-thread-2) Processing event queue item: EVENT_ID=49202, STATE=Start."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:06,128",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.cache.ObjectCache",
+        "message": "(Default Executor-thread-3) Cache hit on class loader cache reference."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:03,890",
+        "level": "INFO",
+        "source": "com.tririga.platform.query.QueryService",
+        "message": "(Default Executor-thread-5) Executing BO query: queryName=triProperty_triLookup, count=125."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:03,890",
+        "level": "INFO",
+        "source": "com.tririga.platform.query.QueryService",
+        "message": "(Default Executor-thread-5) Executing BO query: queryName=triProperty_triLookup, count=125."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:03,890",
+        "level": "INFO",
+        "source": "com.tririga.platform.query.QueryService",
+        "message": "(Default Executor-thread-5) Executing BO query: queryName=triProperty_triLookup, count=125."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:01,124",
+        "level": "INFO",
+        "source": "com.tririga.platform.metadata.MetadataService",
+        "message": "(Default Executor-thread-1) Loading Classifications metadata for cache refresh."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:03,890",
+        "level": "INFO",
+        "source": "com.tririga.platform.query.QueryService",
+        "message": "(Default Executor-thread-5) Executing BO query: queryName=triProperty_triLookup, count=125."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:02,456",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.workflow.WorkflowAgent",
+        "message": "(WorkflowAgent-thread-2) Processing event queue item: EVENT_ID=49202, STATE=Start."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:05,012",
+        "level": "INFO",
+        "source": "com.tririga.platform.event.EventAgent",
+        "message": "(EventAgent-thread-1) Heartbeat check: Platform agent is active and listening."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:03,890",
+        "level": "INFO",
+        "source": "com.tririga.platform.query.QueryService",
+        "message": "(Default Executor-thread-5) Executing BO query: queryName=triProperty_triLookup, count=125."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:01,124",
+        "level": "INFO",
+        "source": "com.tririga.platform.metadata.MetadataService",
+        "message": "(Default Executor-thread-1) Loading Classifications metadata for cache refresh."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:03,890",
+        "level": "INFO",
+        "source": "com.tririga.platform.query.QueryService",
+        "message": "(Default Executor-thread-5) Executing BO query: queryName=triProperty_triLookup, count=125."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:06,128",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.cache.ObjectCache",
+        "message": "(Default Executor-thread-3) Cache hit on class loader cache reference."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:01,124",
+        "level": "INFO",
+        "source": "com.tririga.platform.metadata.MetadataService",
+        "message": "(Default Executor-thread-1) Loading Classifications metadata for cache refresh."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:02,456",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.workflow.WorkflowAgent",
+        "message": "(WorkflowAgent-thread-2) Processing event queue item: EVENT_ID=49202, STATE=Start."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:06,128",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.cache.ObjectCache",
+        "message": "(Default Executor-thread-3) Cache hit on class loader cache reference."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:05,012",
+        "level": "INFO",
+        "source": "com.tririga.platform.event.EventAgent",
+        "message": "(EventAgent-thread-1) Heartbeat check: Platform agent is active and listening."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:02,456",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.workflow.WorkflowAgent",
+        "message": "(WorkflowAgent-thread-2) Processing event queue item: EVENT_ID=49202, STATE=Start."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:05,012",
+        "level": "INFO",
+        "source": "com.tririga.platform.event.EventAgent",
+        "message": "(EventAgent-thread-1) Heartbeat check: Platform agent is active and listening."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:02,456",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.workflow.WorkflowAgent",
+        "message": "(WorkflowAgent-thread-2) Processing event queue item: EVENT_ID=49202, STATE=Start."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:06,128",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.cache.ObjectCache",
+        "message": "(Default Executor-thread-3) Cache hit on class loader cache reference."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:02,456",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.workflow.WorkflowAgent",
+        "message": "(WorkflowAgent-thread-2) Processing event queue item: EVENT_ID=49202, STATE=Start."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:01,124",
+        "level": "INFO",
+        "source": "com.tririga.platform.metadata.MetadataService",
+        "message": "(Default Executor-thread-1) Loading Classifications metadata for cache refresh."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:05,012",
+        "level": "INFO",
+        "source": "com.tririga.platform.event.EventAgent",
+        "message": "(EventAgent-thread-1) Heartbeat check: Platform agent is active and listening."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:01,124",
+        "level": "INFO",
+        "source": "com.tririga.platform.metadata.MetadataService",
+        "message": "(Default Executor-thread-1) Loading Classifications metadata for cache refresh."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:02,456",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.workflow.WorkflowAgent",
+        "message": "(WorkflowAgent-thread-2) Processing event queue item: EVENT_ID=49202, STATE=Start."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:05,012",
+        "level": "INFO",
+        "source": "com.tririga.platform.event.EventAgent",
+        "message": "(EventAgent-thread-1) Heartbeat check: Platform agent is active and listening."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:05,012",
+        "level": "INFO",
+        "source": "com.tririga.platform.event.EventAgent",
+        "message": "(EventAgent-thread-1) Heartbeat check: Platform agent is active and listening."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:06,128",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.cache.ObjectCache",
+        "message": "(Default Executor-thread-3) Cache hit on class loader cache reference."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:06,128",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.cache.ObjectCache",
+        "message": "(Default Executor-thread-3) Cache hit on class loader cache reference."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:03,890",
+        "level": "INFO",
+        "source": "com.tririga.platform.query.QueryService",
+        "message": "(Default Executor-thread-5) Executing BO query: queryName=triProperty_triLookup, count=125."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:05,012",
+        "level": "INFO",
+        "source": "com.tririga.platform.event.EventAgent",
+        "message": "(EventAgent-thread-1) Heartbeat check: Platform agent is active and listening."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:05,012",
+        "level": "INFO",
+        "source": "com.tririga.platform.event.EventAgent",
+        "message": "(EventAgent-thread-1) Heartbeat check: Platform agent is active and listening."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:03,890",
+        "level": "INFO",
+        "source": "com.tririga.platform.query.QueryService",
+        "message": "(Default Executor-thread-5) Executing BO query: queryName=triProperty_triLookup, count=125."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:02,456",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.workflow.WorkflowAgent",
+        "message": "(WorkflowAgent-thread-2) Processing event queue item: EVENT_ID=49202, STATE=Start."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:05,012",
+        "level": "INFO",
+        "source": "com.tririga.platform.event.EventAgent",
+        "message": "(EventAgent-thread-1) Heartbeat check: Platform agent is active and listening."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:06,128",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.cache.ObjectCache",
+        "message": "(Default Executor-thread-3) Cache hit on class loader cache reference."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:03,890",
+        "level": "INFO",
+        "source": "com.tririga.platform.query.QueryService",
+        "message": "(Default Executor-thread-5) Executing BO query: queryName=triProperty_triLookup, count=125."
+      },
+      {
+        "timestamp": "2026-07-14 03:00:06,128",
+        "level": "DEBUG",
+        "source": "com.tririga.platform.cache.ObjectCache",
+        "message": "(Default Executor-thread-3) Cache hit on class loader cache reference."
+      }
+    ]
+  }
+]
