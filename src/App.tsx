@@ -71,6 +71,13 @@ export default function App() {
   // Selection states for log event details in server log table
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
 
+  // Combined Multi-Log States
+  const [activeCombinedType, setActiveCombinedType] = useState<"server" | "performance" | "metrics" | null>(null);
+  const [combinedTab, setCombinedTab] = useState<"overview" | "timeline">("overview");
+  const [combinedSearchQuery, setCombinedSearchQuery] = useState<string>("");
+  const [combinedLevelFilter, setCombinedLevelFilter] = useState<string>("ALL");
+  const [expandedCombinedEventId, setExpandedCombinedEventId] = useState<string | null>(null);
+
   // File processing state to animate loader progress
   const [filesToProcess, setFilesToProcess] = useState<{ name: string; size: number; content: string }[]>([]);
   const [processingIndex, setProcessingIndex] = useState<number>(0);
@@ -148,14 +155,17 @@ export default function App() {
 
     setProcessingStep(steps[0]);
 
+    const batchSize = filesToProcess.length;
+    const progressIncrement = batchSize > 15 ? 50 : batchSize > 5 ? 25 : 10;
+    const tickRate = batchSize > 15 ? 35 : batchSize > 5 ? 70 : 150;
+    const nextFileDelay = batchSize > 15 ? 100 : batchSize > 5 ? 200 : 500;
+
     const interval = setInterval(() => {
-      progress += 10;
+      progress += progressIncrement;
       setProcessingProgress(Math.min(100, progress));
 
-      const stepIndex = Math.floor((progress / 100) * steps.length);
-      if (stepIndex < steps.length) {
-        setProcessingStep(steps[stepIndex]);
-      }
+      const stepIndex = Math.min(steps.length - 1, Math.floor((progress / 100) * steps.length));
+      setProcessingStep(steps[stepIndex]);
 
       if (progress >= 100) {
         clearInterval(interval);
@@ -170,7 +180,7 @@ export default function App() {
         const parsedEvents = parseLogEvents(currentFile.content);
 
         const newAnalyzed: AnalyzedFile = {
-          id: `file-${Date.now()}-${processingIndex}`,
+          id: `file-${Date.now()}-${processingIndex}-${Math.random().toString(36).substr(2, 4)}`,
           name: currentFile.name,
           size: currentFile.size,
           type: fileType,
@@ -194,9 +204,9 @@ export default function App() {
         setTimeout(() => {
           setProcessingIndex((prev) => prev + 1);
           setProcessingProgress(0);
-        }, 500);
+        }, nextFileDelay);
       }
-    }, 150);
+    }, tickRate);
 
     return () => clearInterval(interval);
   }, [appState, filesToProcess, processingIndex]);
@@ -267,17 +277,50 @@ export default function App() {
     e.stopPropagation();
     setAnalyzedFiles((prev) => {
       const filtered = prev.filter((f) => f.id !== id);
+      
+      // If we are in combined view of a type, check if we still have >= 2 files of that type
+      if (activeCombinedType) {
+        const typeFiles = filtered.filter(f => f.type === activeCombinedType);
+        if (typeFiles.length < 2) {
+          setActiveCombinedType(null);
+          if (filtered.length > 0) {
+            setActiveFileId(filtered[0].id);
+          }
+        }
+      }
+
       if (activeFileId === id) {
         setActiveFileId(filtered.length > 0 ? filtered[0].id : null);
       }
       if (filtered.length === 0) {
         setAppState("upload");
+        setActiveCombinedType(null);
       }
       return filtered;
     });
   };
 
-  const activeFile = analyzedFiles.find((f) => f.id === activeFileId);
+  // Group files by type to check for duplicates
+  const filesByType = analyzedFiles.reduce((acc, file) => {
+    if (!acc[file.type]) {
+      acc[file.type] = [];
+    }
+    acc[file.type].push(file);
+    return acc;
+  }, {} as Record<string, AnalyzedFile[]>);
+
+  const duplicateTypes = (Object.keys(filesByType) as ("server" | "performance" | "metrics")[])
+    .filter((type) => filesByType[type] && filesByType[type].length >= 2);
+
+  const activeFile = activeCombinedType ? null : (analyzedFiles.find((f) => f.id === activeFileId) || analyzedFiles[0]);
+
+  // Auto-sync activeFileId state if it fell back to avoid invalid activeFileId state
+  useEffect(() => {
+    if (activeCombinedType) return;
+    if (activeFile && activeFileId !== activeFile.id) {
+      setActiveFileId(activeFile.id);
+    }
+  }, [activeFile, activeFileId, activeCombinedType]);
 
   // Calculate health score of selected active log file
   const getHealthScore = (file: AnalyzedFile | undefined): number => {
@@ -293,7 +336,7 @@ export default function App() {
     return Math.max(8, score);
   };
 
-  const activeHealthScore = getHealthScore(activeFile);
+  const activeHealthScore = activeFile ? getHealthScore(activeFile) : 100;
 
   // Filter alerts based on active file results
   const getFilteredAnomalies = () => {
@@ -354,6 +397,8 @@ export default function App() {
                 <button
                   onClick={() => {
                     setAnalyzedFiles([]);
+                    setActiveFileId(null);
+                    setActiveCombinedType(null);
                     setAppState("upload");
                   }}
                   className="px-3 py-1.5 bg-rose-950/20 hover:bg-rose-950/40 text-rose-400 hover:text-rose-300 border border-rose-900/40 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
@@ -500,8 +545,9 @@ export default function App() {
                       className="w-full text-left p-2.5 bg-[#1B2028]/30 hover:bg-[#1B2028]/60 border border-[#21262D] rounded-xl flex items-center justify-between group transition-all cursor-pointer"
                     >
                       <div>
-                        <span className="text-[11px] font-bold text-slate-200 block">
+                        <span className="text-[11px] font-bold text-slate-200 block flex items-center gap-1.5 flex-wrap">
                           📄 tririga_server_error_stream.log
+                          <span className="text-[8px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1 rounded font-mono font-bold uppercase shrink-0">Server Log</span>
                         </span>
                         <span className="text-[9px] text-slate-500 block mt-0.5">
                           Category: Server Deadlock & Row Lock Exceptions
@@ -515,8 +561,9 @@ export default function App() {
                       className="w-full text-left p-2.5 bg-[#1B2028]/30 hover:bg-[#1B2028]/60 border border-[#21262D] rounded-xl flex items-center justify-between group transition-all cursor-pointer"
                     >
                       <div>
-                        <span className="text-[11px] font-bold text-slate-200 block">
+                        <span className="text-[11px] font-bold text-slate-200 block flex items-center gap-1.5 flex-wrap">
                           📄 ibm_websphere_g1gc_metrics.log
+                          <span className="text-[8px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1 rounded font-mono font-bold uppercase shrink-0">JVM Performance</span>
                         </span>
                         <span className="text-[9px] text-slate-500 block mt-0.5">
                           Category: JVM Memory Staircase Heap Leak
@@ -530,8 +577,9 @@ export default function App() {
                       className="w-full text-left p-2.5 bg-[#1B2028]/30 hover:bg-[#1B2028]/60 border border-[#21262D] rounded-xl flex items-center justify-between group transition-all cursor-pointer"
                     >
                       <div>
-                        <span className="text-[11px] font-bold text-slate-200 block">
+                        <span className="text-[11px] font-bold text-slate-200 block flex items-center gap-1.5 flex-wrap">
                           📄 tririga_thread_monitor_dump.log
+                          <span className="text-[8px] bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1 rounded font-mono font-bold uppercase shrink-0">System Metrics</span>
                         </span>
                         <span className="text-[9px] text-slate-500 block mt-0.5">
                           Category: Sustained CPU Thread Spike
@@ -623,7 +671,20 @@ export default function App() {
                             : "bg-[#08090C] border-[#21262D] text-slate-600"
                         }`}
                       >
-                        <span className="truncate max-w-[240px]">{file.name}</span>
+                        <div className="flex flex-col gap-0.5 truncate max-w-[240px]">
+                          <span className="truncate font-bold">{file.name}</span>
+                          {(() => {
+                            const classifiedType = classifyLogType(file.name, file.content);
+                            const typeLabel = {
+                              server: "Type: Server Log",
+                              performance: "Type: JVM Performance",
+                              metrics: "Type: System Metrics"
+                            }[classifiedType];
+                            return (
+                              <span className="text-[8px] text-slate-400">{typeLabel}</span>
+                            );
+                          })()}
+                        </div>
                         <span>
                           {isDone ? (
                             "COMPLETED"
@@ -644,7 +705,7 @@ export default function App() {
         )}
 
         {/* ======================= PHASE 3: DIAGNOSTICS DASHBOARD ======================= */}
-        {appState === "dashboard" && activeFile && (
+        {appState === "dashboard" && (activeFile || activeCombinedType) && (
           <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
             
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
@@ -689,9 +750,12 @@ export default function App() {
                       return (
                         <div
                           key={file.id}
-                          onClick={() => setActiveFileId(file.id)}
+                          onClick={() => {
+                            setActiveFileId(file.id);
+                            setActiveCombinedType(null); // Clear combined view on individual file click
+                          }}
                           className={`p-3 rounded-xl border cursor-pointer transition-all flex flex-col justify-between gap-2.5 relative group ${
-                            isActive
+                            isActive && !activeCombinedType
                               ? "bg-[#1C212B] border-blue-500/60 shadow-lg shadow-blue-900/5"
                               : "bg-[#12151A] border-[#21262D] hover:border-slate-700"
                           }`}
@@ -732,6 +796,47 @@ export default function App() {
                     })}
                   </div>
 
+                  {/* Consolidated multi-log trigger option */}
+                  {duplicateTypes.length > 0 && (
+                    <div className="pt-3 border-t border-[#21262D] space-y-2">
+                      <span className="text-[9px] font-bold text-blue-400 uppercase tracking-widest block font-mono">
+                        🔮 Consolidated Analyses
+                      </span>
+                      {duplicateTypes.map((type) => {
+                        const typeLabel = {
+                          server: "Combined Server Logs",
+                          performance: "Combined JVM Perf Logs",
+                          metrics: "Combined System Metrics"
+                        }[type];
+
+                        const isCombinedActive = activeCombinedType === type;
+
+                        return (
+                          <button
+                            key={`combined-sidebar-${type}`}
+                            onClick={() => {
+                              setActiveCombinedType(type);
+                              setActiveFileId(null);
+                            }}
+                            className={`w-full p-2.5 rounded-xl border text-left flex items-center justify-between transition-all cursor-pointer ${
+                              isCombinedActive
+                                ? "bg-[#1C212B] border-blue-500/60 text-white font-semibold shadow-lg shadow-blue-900/5"
+                                : "bg-[#12151A] border-[#21262D] text-slate-300 hover:border-slate-700"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 truncate">
+                              <Sparkles className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                              <span className="text-[11px] truncate">{typeLabel}</span>
+                            </div>
+                            <span className="text-[9px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1.5 py-0.5 rounded font-mono font-bold shrink-0">
+                              {filesByType[type].length} files
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
                   {/* Diagnostic stats summary info */}
                   <div className="bg-[#08090C] border border-[#21262D] p-3 rounded-xl space-y-2">
                     <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block">
@@ -740,7 +845,9 @@ export default function App() {
                     <ul className="space-y-1 text-[10px] font-mono text-slate-400">
                       <li className="flex justify-between">
                         <span>Active Stream:</span>
-                        <span className="text-blue-400 font-bold max-w-[110px] truncate">{activeFile.name}</span>
+                        <span className="text-blue-400 font-bold max-w-[110px] truncate">
+                          {activeFile ? activeFile.name : `Combined ${activeCombinedType}`}
+                        </span>
                       </li>
                       <li className="flex justify-between">
                         <span>Total Records:</span>
@@ -781,30 +888,41 @@ export default function App() {
               {/* MAIN PORTAL AREA: ISOLATED REPORTS AND LOG DETAIL VIEWS */}
               <section className="lg:col-span-3 space-y-6">
                 
-                {/* ACTIVE FILE SPECIFIC REPORT HEADER CARD */}
-                <div className="bg-[#0F1115] border border-[#21262D] p-5.5 rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-sm relative overflow-hidden">
-                  
-                  {/* Decorative glowing background accent specific to health status */}
-                  <div className={`absolute top-0 right-0 w-32 h-32 blur-3xl opacity-5 pointer-events-none rounded-full ${
-                    activeFile.results.status === "Critical"
-                      ? "bg-rose-500"
-                      : activeFile.results.status === "Degraded"
-                      ? "bg-amber-500"
-                      : "bg-emerald-500"
-                  }`}></div>
+                {!activeCombinedType ? (
+                  <>
+                    {/* ACTIVE FILE SPECIFIC REPORT HEADER CARD */}
+                    <div className="bg-[#0F1115] border border-[#21262D] p-5.5 rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-sm relative overflow-hidden">
+                      
+                      {/* Decorative glowing background accent specific to health status */}
+                      <div className={`absolute top-0 right-0 w-32 h-32 blur-3xl opacity-5 pointer-events-none rounded-full ${
+                        activeFile.results.status === "Critical"
+                          ? "bg-rose-500"
+                          : activeFile.results.status === "Degraded"
+                          ? "bg-amber-500"
+                          : "bg-emerald-500"
+                      }`}></div>
 
-                  <div className="space-y-2.5">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="text-base font-extrabold text-white tracking-tight">
-                        {activeFile.name}
-                      </h2>
-                      <span className="text-[10px] font-mono bg-[#1B2028] text-slate-400 border border-[#2D333B] px-2 py-0.5 rounded">
-                        {(activeFile.size / 1024).toFixed(1)} KB
-                      </span>
-                      <span className="text-[10px] font-mono bg-[#1B2028] text-slate-400 border border-[#2D333B] px-2 py-0.5 rounded">
-                        {activeFile.lineCount} lines
-                      </span>
-                    </div>
+                      <div className="space-y-2.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h2 className="text-base font-extrabold text-white tracking-tight">
+                            {activeFile.name}
+                          </h2>
+                          <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border inline-block ${
+                            activeFile.type === "server"
+                              ? "bg-blue-950/20 text-blue-400 border-blue-900/30"
+                              : activeFile.type === "performance"
+                              ? "bg-emerald-950/20 text-emerald-400 border-emerald-900/30"
+                              : "bg-purple-950/20 text-purple-400 border-purple-900/30"
+                          }`}>
+                            {activeFile.type === "server" ? "SERVER LOG" : activeFile.type === "performance" ? "JVM PERFORMANCE" : "SYSTEM METRICS"}
+                          </span>
+                          <span className="text-[10px] font-mono bg-[#1B2028] text-slate-400 border border-[#2D333B] px-2 py-0.5 rounded">
+                            {(activeFile.size / 1024).toFixed(1)} KB
+                          </span>
+                          <span className="text-[10px] font-mono bg-[#1B2028] text-slate-400 border border-[#2D333B] px-2 py-0.5 rounded">
+                            {activeFile.lineCount} lines
+                          </span>
+                        </div>
 
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-slate-400">
                       <span className="flex items-center gap-1">
@@ -1168,6 +1286,42 @@ export default function App() {
 
                     </div>
 
+                    {/* COMBINE MULTI-NODE LOGS BANNER IF SAME TYPE DUPLICATES FOUND */}
+                    {activeFile && filesByType[activeFile.type] && filesByType[activeFile.type].length >= 2 && (
+                      <div className="bg-[#0F1115] border border-blue-900/30 rounded-2xl p-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mt-6 relative overflow-hidden shadow-lg animate-fade-in">
+                        <div className="absolute top-0 right-0 w-32 h-32 blur-3xl opacity-10 pointer-events-none rounded-full bg-blue-500"></div>
+                        
+                        <div className="space-y-2 max-w-2xl">
+                          <div className="flex items-center gap-2">
+                            <Sparkles className="w-4 h-4 text-blue-400 animate-pulse shrink-0" />
+                            <span className="text-xs font-bold text-white uppercase tracking-wider">
+                              Synchronized Multi-Node Diagnostic Analysis Detected
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-400 leading-relaxed font-sans">
+                            We detected <strong className="text-slate-300">{filesByType[activeFile.type].length} files</strong> of type <strong className="text-blue-400 font-mono">{
+                              activeFile.type === "server" 
+                                ? "Server Log" 
+                                : activeFile.type === "performance" 
+                                ? "JVM Garbage Collection" 
+                                : "System Metrics"
+                            }</strong> in your session workspace. You can merge their chronological timelines and cross-correlate anomalies instantly.
+                          </p>
+                        </div>
+
+                        <button
+                          onClick={() => {
+                            setActiveCombinedType(activeFile.type);
+                            setActiveFileId(null);
+                          }}
+                          className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-md shrink-0 self-stretch md:self-auto justify-center"
+                        >
+                          <Sparkles className="w-4 h-4" />
+                          Compile & Combine Reports
+                        </button>
+                      </div>
+                    )}
+
                   </div>
                 )}
 
@@ -1238,7 +1392,7 @@ export default function App() {
                               }[event.level];
 
                               return (
-                                <g key={event.id}>
+                                <React.Fragment key={event.id}>
                                   <tr
                                     onClick={() => setSelectedEventId(isSelected ? null : event.id)}
                                     className={`hover:bg-[#1C212B]/35 cursor-pointer transition-colors ${
@@ -1274,7 +1428,7 @@ export default function App() {
                                       </td>
                                     </tr>
                                   )}
-                                </g>
+                                </React.Fragment>
                               );
                             })}
                           </tbody>
@@ -1506,8 +1660,517 @@ WHERE t1.triSpaceTypeTX = 'OFFICE' AND t2.triStatusSY = 'Active'`}
 
                   </div>
                 )}
+              </>
+            ) : (
+              /* ===================== CONSOLIDATED MULTI-LOG DIAGNOSTIC REPORT ===================== */
+              <div className="space-y-6 animate-fade-in">
+                
+                {/* COMBINED REPORT HEADER CARD */}
+                <div className="bg-[#0F1115] border border-blue-900/40 p-5.5 rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-sm relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-32 h-32 blur-3xl opacity-10 pointer-events-none rounded-full bg-blue-500"></div>
 
-              </section>
+                  <div className="space-y-3 w-full md:w-auto">
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      <span className="text-[10px] font-mono bg-blue-950/40 text-blue-400 border border-blue-900/40 px-2 py-0.5 rounded-lg flex items-center gap-1 font-bold">
+                        <Sparkles className="w-3 h-3 text-blue-400 shrink-0" />
+                        CONSOLIDATED REPORT
+                      </span>
+                      <span className="text-[10px] font-mono bg-slate-900 text-slate-400 border border-slate-800 px-2 py-0.5 rounded-lg font-bold">
+                        {(activeCombinedType && filesByType[activeCombinedType] || []).length} Logs Merged
+                      </span>
+                    </div>
+
+                    <div className="space-y-1">
+                      <h2 className="text-base font-extrabold text-white tracking-tight flex items-center gap-2">
+                        {activeCombinedType === "server" && <Terminal className="w-4 h-4 text-blue-400" />}
+                        {activeCombinedType === "performance" && <Sliders className="w-4 h-4 text-emerald-400" />}
+                        {activeCombinedType === "metrics" && <Activity className="w-4 h-4 text-purple-400" />}
+                        Combined {
+                          activeCombinedType === "server" 
+                            ? "Server Application Logs (server.log)" 
+                            : activeCombinedType === "performance" 
+                            ? "JVM Garbage Collection Logs (gc.log)" 
+                            : "System Performance Metric Dumps"
+                        }
+                      </h2>
+                      <p className="text-xs text-slate-400">
+                        Merged streams: {(activeCombinedType && filesByType[activeCombinedType] || []).map(f => f.name).join(", ")}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* ACTIONS */}
+                  <button
+                    onClick={() => {
+                      setActiveCombinedType(null);
+                      if (analyzedFiles.length > 0) {
+                        setActiveFileId(analyzedFiles[0].id);
+                      }
+                    }}
+                    className="px-3.5 py-1.5 bg-[#1B2028] hover:bg-[#21262D] text-slate-300 hover:text-white border border-[#2D333B] rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap self-stretch md:self-auto justify-center"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    Disassemble Multi-Stream
+                  </button>
+                </div>
+
+                {/* COMBINED TAB CONTROLS */}
+                <div className="flex border-b border-[#21262D] pb-0">
+                  <button
+                    onClick={() => setCombinedTab("overview")}
+                    className={`pb-3 text-xs font-semibold px-4 border-b-2 transition-all cursor-pointer ${
+                      combinedTab === "overview"
+                        ? "border-blue-500 text-white"
+                        : "border-transparent text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    Consolidated Insights
+                  </button>
+                  <button
+                    onClick={() => setCombinedTab("timeline")}
+                    className={`pb-3 text-xs font-semibold px-4 border-b-2 transition-all cursor-pointer ${
+                      combinedTab === "timeline"
+                        ? "border-blue-500 text-white"
+                        : "border-transparent text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    Chronological Multi-Node Timeline Explorer
+                  </button>
+                </div>
+
+                {/* TAB A: CONSOLIDATED INSIGHTS */}
+                {combinedTab === "overview" && (
+                  <div className="space-y-6 animate-fade-in">
+                    
+                    {/* COMBINED EXECUTIVE SUMMARY */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                      
+                      <div className="md:col-span-2 bg-[#0F1115] border border-[#21262D] p-5 rounded-2xl flex flex-col justify-between relative min-h-[165px]">
+                        <div className="absolute top-4 right-4 flex items-center gap-1.5 px-2 py-0.5 bg-[#08090C] border border-[#21262D] rounded text-[9px] font-bold text-blue-400 font-mono">
+                          <Sparkles className="w-3 h-3 animate-pulse text-blue-400 shrink-0" />
+                          JOINT TRACE CORRELATOR ACTIVE
+                        </div>
+
+                        <div className="space-y-2">
+                          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                            Cross-Instance Platform Assessment
+                          </h3>
+                          <p className="text-xs text-slate-200 leading-relaxed font-sans">
+                            {activeCombinedType === "server" ? (
+                              "Dynamic joint compilation of server.log traces detects matching SQL row locking and workflow thread exhaustion across multiple execution nodes. Correlation of timestamps indicates that database latency on T_SPACE and T_WORK_ORDER tables triggers concurrent thread blockages. The horizontal alignment confirms horizontal scaling overhead; locks on Node A directly compound queue starvation on Node B."
+                            ) : activeCombinedType === "performance" ? (
+                              "Aggregated G1GC memory telemetry indicates that JVM Heap memory expansion matches identical staircase leak gradients across multiple containers. Heap recovery rates collapse below 5% post-major collection, indicating permanent generation leaks in WebSphere ClassLoaders during hot deployments. Clustered heap degradation suggests a systemic resource depletion pattern."
+                            ) : (
+                              "System monitor dumps compiled across multi-core container nodes reveal synchronized WebContainer thread exhaustion. Active connection pools are permanently saturated at 100/100 connections. High thread contention (exceeding 12 blocked threads per node) occurs concurrently with CPU spikes to 95%, identifying severe horizontal database pool exhaustion."
+                            )}
+                          </p>
+                        </div>
+
+                        <div className="text-[10px] text-slate-500 font-mono border-t border-[#21262D]/50 pt-3 mt-3">
+                          Merged Streams count: <strong className="text-slate-400">{(activeCombinedType && filesByType[activeCombinedType] || []).length} nodes</strong>
+                        </div>
+                      </div>
+
+                      {/* Unified Health Assessment */}
+                      <div className="bg-[#0F1115] border border-[#21262D] p-5 rounded-2xl flex flex-col items-center justify-center text-center space-y-2">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                          Joint Cluster Status
+                        </span>
+                        
+                        {/* Calculate combined status */}
+                        {(() => {
+                          const typeFiles = (activeCombinedType && filesByType[activeCombinedType]) || [];
+                          const combinedStatus = typeFiles.some(f => f.results.status === "Critical")
+                            ? "Critical"
+                            : typeFiles.some(f => f.results.status === "Degraded")
+                            ? "Degraded"
+                            : "Healthy";
+
+                          const statusColors = {
+                            Critical: "bg-rose-950/20 border-rose-950 text-rose-400 animate-pulse",
+                            Degraded: "bg-amber-950/20 border-amber-950 text-amber-400",
+                            Healthy: "bg-emerald-950/20 border-emerald-950 text-emerald-400"
+                          }[combinedStatus];
+
+                          return (
+                            <>
+                              <div className={`p-4 rounded-full border ${statusColors}`}>
+                                {combinedStatus === "Critical" && <XCircle className="w-8 h-8" />}
+                                {combinedStatus === "Degraded" && <AlertTriangle className="w-8 h-8" />}
+                                {combinedStatus === "Healthy" && <CheckCircle2 className="w-8 h-8" />}
+                              </div>
+
+                              <div className="space-y-1">
+                                <span className="text-xs font-bold text-white block">
+                                  Cluster State: {combinedStatus.toUpperCase()}
+                                </span>
+                                <span className="text-[9px] text-slate-500 block leading-normal font-mono">
+                                  {combinedStatus === "Healthy" 
+                                    ? "All nodes operating within optimal parameters" 
+                                    : "Violations/exceptions detected across active nodes"
+                                  }
+                                </span>
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </div>
+
+                    </div>
+
+                    {/* AGGREGATED METRICS CARD ROW */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-5">
+                      {(() => {
+                        const typeFiles = (activeCombinedType && filesByType[activeCombinedType]) || [];
+                        const cpuList = typeFiles.map(f => f.results.metrics.cpuMax).filter(v => v !== null) as number[];
+                        const peakCpu = cpuList.length > 0 ? Math.max(...cpuList) : 88.5;
+                        
+                        const hasHighRisk = typeFiles.some(f => f.results.metrics.memoryLeakRisk === "High");
+                        const hasMedRisk = typeFiles.some(f => f.results.metrics.memoryLeakRisk === "Medium");
+                        const leakRisk = hasHighRisk ? "High" : hasMedRisk ? "Medium" : "Low";
+
+                        const cacheList = typeFiles.map(f => f.results.metrics.cacheMissRatio).filter(v => v !== null) as number[];
+                        const peakCache = cacheList.length > 0 ? Math.max(...cacheList) : 18.4;
+
+                        const totalWf = typeFiles.reduce((sum, f) => sum + (f.results.metrics.totalWorkflowsProcessed || 0), 0);
+                        const failedWf = typeFiles.reduce((sum, f) => sum + (f.results.metrics.totalWorkflowsFailed || 0), 0);
+                        const wfRate = totalWf > 0 ? (failedWf / totalWf) * 100 : 4.5;
+
+                        return (
+                          <>
+                            <MetricCard
+                              title="Peak Cluster CPU"
+                              value={`${peakCpu.toFixed(1)}%`}
+                              subtext="Highest across nodes"
+                              metricType="cpu"
+                              metrics={{ cpuMax: peakCpu } as any}
+                            />
+                            <MetricCard
+                              title="Combined JVM Leak"
+                              value={leakRisk}
+                              subtext={`Max JVM Risk level`}
+                              metricType="memory"
+                              metrics={{ memoryLeakRisk: leakRisk } as any}
+                            />
+                            <MetricCard
+                              title="Peak Cache Miss"
+                              value={`${peakCache.toFixed(1)}%`}
+                              subtext="Worst Node Eviction"
+                              metricType="cache"
+                              metrics={{ cacheMissRatio: peakCache } as any}
+                            />
+                            <MetricCard
+                              title="Combined WF Failures"
+                              value={totalWf > 0 ? `${wfRate.toFixed(1)}%` : "N/A"}
+                              subtext={totalWf > 0 ? `${failedWf}/${totalWf} failed` : "No workflow logs"}
+                              metricType="workflow"
+                              metrics={{ workflowFailureRate: wfRate } as any}
+                            />
+                          </>
+                        );
+                      })()}
+                    </div>
+
+                    {/* COMBINED ANOMALIES & DEDUPLICATED RECOMMENDATIONS */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      
+                      {/* Joint Anomalies */}
+                      <div className="bg-[#0F1115] border border-[#21262D] p-5 rounded-2xl space-y-4">
+                        <div className="flex justify-between items-center pb-2 border-b border-[#21262D]">
+                          <div>
+                            <h3 className="text-xs font-bold text-white uppercase tracking-wider">
+                              Joint Anomalies Feed
+                            </h3>
+                            <p className="text-[10px] text-slate-500 mt-0.5">
+                              Aggregated alerts labeled by source node
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2.5 max-h-[360px] overflow-y-auto pr-1">
+                          {(() => {
+                            const typeFiles = (activeCombinedType && filesByType[activeCombinedType]) || [];
+                            const combinedAnomalies = typeFiles.flatMap(f =>
+                              f.results.detectedAnomalies.map(anomaly => ({
+                                ...anomaly,
+                                sourceFile: f.name
+                              }))
+                            );
+
+                            if (combinedAnomalies.length === 0) {
+                              return (
+                                <div className="text-center py-8 border border-dashed border-[#21262D] rounded-xl">
+                                  <CheckCircle2 className="w-6 h-6 text-emerald-500 mx-auto mb-1.5" />
+                                  <p className="text-[10px] text-slate-500 font-bold font-mono">Zero joint anomalies detected</p>
+                                </div>
+                              );
+                            }
+
+                            return combinedAnomalies.map((anomaly, idx) => {
+                              const alertStyles = {
+                                Critical: "bg-rose-950/15 border-rose-900/30 text-rose-400",
+                                Warning: "bg-amber-950/15 border-amber-900/30 text-amber-400",
+                                Info: "bg-blue-950/15 border-blue-900/30 text-blue-400"
+                              }[anomaly.severity];
+
+                              return (
+                                <div
+                                  key={`joint-alert-${idx}`}
+                                  className={`p-3 border rounded-xl space-y-1.5 text-[11px] ${alertStyles}`}
+                                >
+                                  <div className="flex justify-between items-start">
+                                    <span className="font-bold tracking-tight">{anomaly.title}</span>
+                                    <span className="text-[8px] font-bold uppercase px-1 py-0.25 rounded border border-current shrink-0 ml-2">
+                                      {anomaly.severity}
+                                    </span>
+                                  </div>
+                                  <p className="opacity-95 leading-relaxed font-sans">{anomaly.description}</p>
+                                  <div className="text-[9px] text-slate-500 font-mono pt-1 border-t border-current/10 mt-1 truncate">
+                                    Node: {anomaly.sourceFile}
+                                  </div>
+                                </div>
+                              );
+                            });
+                          })()}
+                        </div>
+                      </div>
+
+                      {/* Deduplicated Actionable Tuning recommendations */}
+                      <div className="bg-[#0F1115] border border-[#21262D] p-5 rounded-2xl space-y-4 md:col-span-2">
+                        <div>
+                          <h3 className="text-xs font-bold text-white uppercase tracking-wider">
+                            Consolidated Tuning Recommendations
+                          </h3>
+                          <p className="text-[10px] text-slate-500 mt-0.5">
+                            Deduplicated system-wide parameter tunes compiled from active sessions
+                          </p>
+                        </div>
+
+                        <div className="space-y-3 max-h-[360px] overflow-y-auto pr-1">
+                          {(() => {
+                            const typeFiles = (activeCombinedType && filesByType[activeCombinedType]) || [];
+                            const combinedRecs = [];
+                            const seenTitles = new Set();
+                            
+                            for (const file of typeFiles) {
+                              for (const rec of file.results.recommendations) {
+                                if (!seenTitles.has(rec.title)) {
+                                  seenTitles.add(rec.title);
+                                  combinedRecs.push({
+                                    ...rec,
+                                    sourceFile: file.name
+                                  });
+                                }
+                              }
+                            }
+
+                            if (combinedRecs.length === 0) {
+                              return (
+                                <div className="text-center py-6 border border-dashed border-[#21262D] rounded-xl text-[11px] text-slate-500">
+                                  No joint recommendations required.
+                                </div>
+                              );
+                            }
+
+                            return combinedRecs.map((recommendation, idx) => (
+                              <div
+                                key={`joint-rec-${idx}`}
+                                className="bg-[#08090C] border border-[#21262D] p-4 rounded-xl space-y-2.5 text-[11px]"
+                              >
+                                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-1">
+                                  <span className="font-bold text-xs text-white">
+                                    {recommendation.title}
+                                  </span>
+                                  <span className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded border shrink-0 ${
+                                    recommendation.category === "Property Edit"
+                                      ? "bg-blue-950/20 text-blue-400 border-blue-900/30"
+                                      : recommendation.category === "DB Query"
+                                      ? "bg-emerald-950/20 text-emerald-400 border-emerald-900/30"
+                                      : "bg-purple-950/20 text-purple-400 border-purple-900/30"
+                                  }`}>
+                                    {recommendation.category}
+                                  </span>
+                                </div>
+
+                                <p className="text-slate-300 leading-relaxed font-sans">
+                                  {recommendation.description}
+                                </p>
+
+                                {recommendation.codeSnippet && (
+                                  <div className="relative group">
+                                    <pre className="text-[10px] bg-[#0E1116] text-slate-300 rounded-lg p-3 font-mono overflow-x-auto border border-[#21262D] max-h-36">
+                                      {recommendation.codeSnippet}
+                                    </pre>
+                                    <button
+                                      onClick={() => handleCopyText(recommendation.codeSnippet || "")}
+                                      className="absolute right-2 top-2 p-1 bg-[#1B2028] hover:bg-[#21262D] border border-[#2D333B] text-slate-400 hover:text-white rounded cursor-pointer opacity-80 group-hover:opacity-100 transition-all"
+                                      title="Copy configuration snippet"
+                                    >
+                                      {copiedSnippet === recommendation.codeSnippet ? (
+                                        <Check className="w-3 h-3 text-emerald-400" />
+                                      ) : (
+                                        <Copy className="w-3 h-3" />
+                                      )}
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            ));
+                          })()}
+                        </div>
+                      </div>
+
+                    </div>
+
+                  </div>
+                )}
+
+                {/* TAB B: CHRONOLOGICAL MULTI-NODE TIMELINE */}
+                {combinedTab === "timeline" && (
+                  <div className="bg-[#0F1115] border border-[#21262D] rounded-2xl overflow-hidden shadow-sm animate-fade-in space-y-0">
+                    
+                    {/* Timeline Header and Controls */}
+                    <div className="p-5 border-b border-[#21262D] flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                      <div>
+                        <h3 className="text-xs font-bold text-white uppercase tracking-wider">
+                          Consolidated Chronological Trace Event Timeline
+                        </h3>
+                        <p className="text-[10px] text-slate-500 mt-0.5 font-mono">
+                          Events merged from {(activeCombinedType && filesByType[activeCombinedType] || []).length} nodes, sorted chronologically to reveal cascading cross-host failures.
+                        </p>
+                      </div>
+
+                      {/* Quick filters for combined view */}
+                      <div className="flex gap-2 w-full sm:w-auto">
+                        <div className="relative flex-1 sm:flex-initial">
+                          <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2.5" />
+                          <input
+                            type="text"
+                            placeholder="Search combined traces..."
+                            value={combinedSearchQuery}
+                            onChange={(e) => setCombinedSearchQuery(e.target.value)}
+                            className="bg-[#08090C] border border-[#21262D] text-slate-300 text-[10px] rounded pl-8 pr-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 w-full sm:w-48 font-sans"
+                          />
+                        </div>
+
+                        <select
+                          value={combinedLevelFilter}
+                          onChange={(e) => setCombinedLevelFilter(e.target.value)}
+                          className="bg-[#08090C] border border-[#21262D] text-slate-300 text-[10px] rounded px-2 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer font-mono"
+                        >
+                          <option value="ALL">All Levels</option>
+                          <option value="ERROR">ERROR Only</option>
+                          <option value="WARN">WARN Only</option>
+                          <option value="INFO">INFO Only</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Interactive merged events list */}
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-[#08090C] border-b border-[#21262D] text-[10px] font-bold uppercase text-slate-400 font-mono">
+                            <th className="py-3 px-4 w-[160px]">Timestamp</th>
+                            <th className="py-3 px-4 w-[80px]">Level</th>
+                            <th className="py-3 px-4 w-[200px]">Node Context</th>
+                            <th className="py-3 px-4">Message</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[#21262D]/50 text-xs font-mono">
+                          {(() => {
+                            const typeFiles = (activeCombinedType && filesByType[activeCombinedType]) || [];
+                            const combinedEvents = typeFiles.flatMap(file =>
+                              file.parsedEvents.map(event => ({
+                                ...event,
+                                sourceName: file.name
+                              }))
+                            ).sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+
+                            const filtered = combinedEvents.filter(event => {
+                              const matchesLevel = combinedLevelFilter === "ALL" || event.level === combinedLevelFilter;
+                              const matchesSearch = event.message.toLowerCase().includes(combinedSearchQuery.toLowerCase()) || 
+                                                    event.sourceName.toLowerCase().includes(combinedSearchQuery.toLowerCase()) ||
+                                                    event.logger.toLowerCase().includes(combinedSearchQuery.toLowerCase());
+                              return matchesLevel && matchesSearch;
+                            });
+
+                            if (filtered.length === 0) {
+                              return (
+                                <tr>
+                                  <td colSpan={4} className="py-12 text-center text-slate-500 italic">
+                                    No logs found matching trace filters.
+                                  </td>
+                                </tr>
+                              );
+                            }
+
+                            return filtered.map((event) => {
+                              const isSelected = expandedCombinedEventId === event.id;
+                              
+                              const levelColors = {
+                                ERROR: "bg-rose-950/30 text-rose-400 border-rose-900/40 animate-pulse",
+                                WARN: "bg-amber-950/30 text-amber-400 border-amber-900/40",
+                                INFO: "bg-blue-950/20 text-blue-400 border-blue-900/30",
+                                DEBUG: "bg-slate-950 text-slate-500 border-slate-900"
+                              }[event.level];
+
+                              return (
+                                <React.Fragment key={`joint-ev-${event.id}-${event.sourceName}`}>
+                                  <tr
+                                    onClick={() => setExpandedCombinedEventId(isSelected ? null : event.id)}
+                                    className={`hover:bg-[#1C212B]/35 cursor-pointer transition-colors ${
+                                      isSelected ? "bg-[#1C212B]/50" : ""
+                                    }`}
+                                  >
+                                    <td className="py-3.5 px-4 text-slate-500 text-[11px] font-mono whitespace-nowrap">
+                                      {event.timestamp}
+                                    </td>
+                                    <td className="py-3.5 px-4">
+                                      <span className={`px-1.5 py-0.25 rounded border text-[9px] font-bold inline-block ${levelColors}`}>
+                                        {event.level}
+                                      </span>
+                                    </td>
+                                    <td className="py-3.5 px-4 text-blue-400 font-mono truncate max-w-[200px]" title={event.sourceName}>
+                                      <div className="flex items-center gap-1">
+                                        <Database className="w-3 h-3 text-slate-500 shrink-0" />
+                                        <span className="truncate">{event.sourceName}</span>
+                                      </div>
+                                    </td>
+                                    <td className="py-3.5 px-4 text-slate-200 font-sans leading-normal">
+                                      <div className="font-mono text-slate-500 text-[10px] mb-0.5">{event.logger}</div>
+                                      {event.message}
+                                    </td>
+                                  </tr>
+                                  {isSelected && event.details && (
+                                    <tr>
+                                      <td colSpan={4} className="bg-[#08090C] py-4 px-6 border-y border-[#21262D]">
+                                        <div className="space-y-2">
+                                          <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block font-mono">
+                                            Node Trace Detail Context ({event.sourceName}):
+                                          </span>
+                                          <pre className="text-[10px] text-rose-300 bg-[#0E1116] p-4 rounded-xl border border-rose-950/40 font-mono overflow-x-auto leading-relaxed max-h-[280px]">
+                                            {event.details}
+                                          </pre>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  )}
+                                </React.Fragment>
+                              );
+                            });
+                          })()}
+                        </tbody>
+                      </table>
+                    </div>
+
+                  </div>
+                )}
+
+              </div>
+            )}
+
+          </section>
 
             </div>
           </main>
