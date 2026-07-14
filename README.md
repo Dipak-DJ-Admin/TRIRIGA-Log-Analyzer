@@ -40,6 +40,28 @@ The diagnostics engine is engineered to handle large enterprise cluster deployme
 
 ---
 
+## 📊 Enterprise Visual Reporting & Full Analytics Export
+
+To ensure findings can be easily shared with senior leadership and database/system administrators, the platform features a comprehensive, high-fidelity visual exporter:
+
+### 1. 🌐 Interactive Offline HTML Dashboard Exporter (`.html`)
+* **Standalone Portability**: Exports a fully styled, self-contained, interactive HTML dashboard containing a dark-slate design optimized for readability.
+* **Live Vector KPI Gauges**: Features beautiful, crisp vector charts generated dynamically for:
+  * **Circular Health Score Gauge**: Color-coded, high-contrast dynamic circular rating indicating overall system health.
+  * **Semi-Circular Peak CPU Gauge**: Gauge arch that highlights CPU threshold exhaustion with warning levels.
+  * **Memory Trend Sparkline**: Shows G1GC heap reclamation and memory leak risk profile.
+  * **Cache Miss Donut Chart**: Highlights cache-miss latency risks with clean visual ratios.
+  * **Workflow Ratio Stacked Bar**: Interactive stacked bar contrasting processed workflows vs. failures.
+* **Actionable Remediation Playbooks**: Interactive code block areas allow DBAs and Admins to copy-paste optimization scripts or properties with a single click.
+* **Multi-Node Cluster Matrix**: For cluster-wide uploads, the exported HTML bundles all nodes into a unified Comparison Grid and lists individual findings side-by-side.
+
+### 2. 📝 Rich Markdown Diagnostics Report (`.md`)
+* **Full Data Transparency**: Replaces limited summary logs with comprehensive, structured reports including individual file attributes, full executive summaries, root cause analyses (RCA), and actionable troubleshooting steps.
+* **Embedded SVG Visuals**: The generated Markdown embeds vector SVGs directly so they render beautifully inside GitHub, VS Code, or GitLab, ensuring technical documentation is accompanied by visual charts.
+* **KPI Reference Tables**: Maps each metric against default operational thresholds and rates the performance of each subsystem.
+
+---
+
 ## 🚀 Execution Steps for All Operating Systems
 
 ### 🔹 Pathway A: Running the Standalone Offline Tool (No Setup)

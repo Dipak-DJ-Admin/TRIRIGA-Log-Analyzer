@@ -467,31 +467,160 @@ ${colors.bold}Capabilities:${colors.reset}
     index++;
   }
 
+  // SVG Gauge and Chart generators for rich visual exports (Markdown & HTML)
+  const generateHealthGaugeSVG = (score: number, status: string) => {
+    const color = status === "Critical" ? "#F87171" : status === "Degraded" ? "#FBBF24" : "#34D399";
+    const trackColor = "#21262D";
+    const radius = 40;
+    const circumference = 2 * Math.PI * radius;
+    const strokeDashoffset = circumference - (score / 100) * circumference;
+    
+    return `<svg width="180" height="180" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" style="background:#0D1117; border-radius:16px; border:1px solid #30363D; font-family:system-ui, -apple-system, sans-serif;">
+      <!-- Circular Track -->
+      <circle cx="60" cy="55" r="${radius}" fill="none" stroke="${trackColor}" stroke-width="8" />
+      <!-- Progress Arc -->
+      <circle cx="60" cy="55" r="${radius}" fill="none" stroke="${color}" stroke-width="8" 
+              stroke-dasharray="${circumference}" stroke-dashoffset="${strokeDashoffset}" 
+              stroke-linecap="round" transform="rotate(-90 60 55)" />
+      <!-- Score Text -->
+      <text x="60" y="58" font-size="20" font-weight="bold" fill="#F0F6FC" text-anchor="middle">${score}</text>
+      <text x="60" y="74" font-size="9" font-weight="600" fill="#8B949E" text-anchor="middle" letter-spacing="0.5">HEALTH SCORE</text>
+      <!-- Status Badge -->
+      <rect x="30" y="94" width="60" height="14" rx="7" fill="${color}20" stroke="${color}40" stroke-width="1" />
+      <text x="60" y="104" font-size="8" font-weight="bold" fill="${color}" text-anchor="middle">${status.toUpperCase()}</text>
+    </svg>`;
+  };
+
+  const generateCpuGaugeSVG = (cpuMax: number | null) => {
+    const val = cpuMax !== null ? cpuMax : 0;
+    const color = val > 80 ? "#F87171" : val > 50 ? "#FBBF24" : "#60A5FA";
+    
+    return `<svg width="220" height="140" viewBox="0 0 160 100" xmlns="http://www.w3.org/2000/svg" style="background:#0D1117; border-radius:16px; border:1px solid #30363D; font-family:system-ui, -apple-system, sans-serif;">
+      <!-- Background Gauge Track -->
+      <path d="M 20,80 A 60,60 0 0,1 140,80" fill="none" stroke="#21262D" stroke-width="12" stroke-linecap="round" />
+      <!-- Colored Gauge Arc -->
+      <path d="M 20,80 A 60,60 0 0,1 140,80" fill="none" stroke="${color}" stroke-width="12" stroke-linecap="round" 
+            stroke-dasharray="188.5" stroke-dashoffset="${188.5 - (val / 100) * 188.5}" />
+      <!-- Value Text -->
+      <text x="80" y="75" font-size="18" font-weight="bold" fill="#F0F6FC" text-anchor="middle">${val.toFixed(1)}%</text>
+      <text x="80" y="92" font-size="8" font-weight="bold" fill="#8B949E" text-anchor="middle" letter-spacing="0.5">PEAK CPU LOAD</text>
+    </svg>`;
+  };
+
+  const generateMemoryTrendSVG = (risk: string, trend: string) => {
+    const isHigh = risk === "High";
+    const isMed = risk === "Medium";
+    const color = isHigh ? "#F87171" : isMed ? "#FBBF24" : "#34D399";
+    const pathD = isHigh 
+      ? "M 15,75 Q 40,70 65,50 T 115,25 T 165,15" 
+      : isMed 
+      ? "M 15,65 Q 40,60 65,45 T 115,35 T 165,25" 
+      : "M 15,45 Q 40,30 65,45 T 115,45 T 165,45";
+    
+    return `<svg width="220" height="140" viewBox="0 0 180 100" xmlns="http://www.w3.org/2000/svg" style="background:#0D1117; border-radius:16px; border:1px solid #30363D; font-family:system-ui, -apple-system, sans-serif;">
+      <!-- Grid lines -->
+      <line x1="15" y1="20" x2="165" y2="20" stroke="#21262D" stroke-dasharray="2,2" />
+      <line x1="15" y1="50" x2="165" y2="50" stroke="#21262D" stroke-dasharray="2,2" />
+      <line x1="15" y1="80" x2="165" y2="80" stroke="#21262D" stroke-dasharray="2,2" />
+      <!-- Trend Line -->
+      <path d="${pathD}" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round" />
+      <!-- Start & End Nodes -->
+      <circle cx="15" cy="${isHigh ? 75 : isMed ? 65 : 45}" r="4" fill="${color}" />
+      <circle cx="165" cy="${isHigh ? 15 : isMed ? 25 : 45}" r="4" fill="${color}" />
+      <!-- Text Labels -->
+      <text x="15" y="93" font-size="8" font-weight="bold" fill="#8B949E" letter-spacing="0.5">JVM HEAP TREND</text>
+      <text x="165" y="93" font-size="8" font-weight="bold" fill="${color}" text-anchor="end">${risk} RISK (${trend})</text>
+    </svg>`;
+  };
+
+  const generateCacheMissSVG = (missRatio: number | null) => {
+    const val = missRatio !== null ? missRatio : 0;
+    const color = val > 20 ? "#F87171" : val > 10 ? "#FBBF24" : "#34D399";
+    
+    return `<svg width="220" height="140" viewBox="0 0 160 100" xmlns="http://www.w3.org/2000/svg" style="background:#0D1117; border-radius:16px; border:1px solid #30363D; font-family:system-ui, -apple-system, sans-serif;">
+      <!-- Circular Track -->
+      <circle cx="80" cy="40" r="28" fill="none" stroke="#21262D" stroke-width="10" />
+      <!-- Progress Arc -->
+      <circle cx="80" cy="40" r="28" fill="none" stroke="${color}" stroke-width="10" 
+              stroke-dasharray="175.9" stroke-dashoffset="${175.9 - (val / 100) * 175.9}" 
+              stroke-linecap="round" transform="rotate(-90 80 40)" />
+      <!-- Inner Text -->
+      <text x="80" y="45" font-size="12" font-weight="bold" fill="#F0F6FC" text-anchor="middle">${val.toFixed(1)}%</text>
+      <text x="80" y="85" font-size="8" font-weight="bold" fill="#8B949E" text-anchor="middle" letter-spacing="0.5">CACHE MISS RATIO</text>
+    </svg>`;
+  };
+
+  const generateWorkflowFailureSVG = (failRate: number | null, failed: number, processed: number) => {
+    const rate = failRate !== null ? failRate : 0;
+    const color = rate > 2.0 ? "#F87171" : rate > 0.5 ? "#FBBF24" : "#34D399";
+    const successRate = 100 - rate;
+    
+    return `<svg width="220" height="140" viewBox="0 0 180 100" xmlns="http://www.w3.org/2000/svg" style="background:#0D1117; border-radius:16px; border:1px solid #30363D; font-family:system-ui, -apple-system, sans-serif;">
+      <!-- Horizontal Stacked Bar representing Workflow State -->
+      <rect x="15" y="35" width="150" height="14" rx="7" fill="#21262D" />
+      <rect x="15" y="35" width="${(successRate / 100) * 150}" height="14" rx="7" fill="#10B981" />
+      ${rate > 0 ? `<rect x="${15 + (successRate / 100) * 150 - 3}" width="${Math.max(6, (rate / 100) * 150)}" y="35" height="14" rx="7" fill="#EF4444" />` : ""}
+      <!-- Legend -->
+      <circle cx="20" cy="65" r="3" fill="#10B981" />
+      <text x="28" y="68" font-size="8" font-weight="bold" fill="#8B949E">OK (${(processed - failed).toLocaleString()})</text>
+      <circle cx="100" cy="65" r="3" fill="#EF4444" />
+      <text x="108" y="68" font-size="8" font-weight="bold" fill="#8B949E">FAIL (${failed.toLocaleString()})</text>
+      <text x="15" y="24" font-size="9" font-weight="bold" fill="#F0F6FC">WORKFLOW RATIO</text>
+      <text x="15" y="90" font-size="8" font-weight="bold" fill="${color}">Failure Rate: ${rate.toFixed(1)}%</text>
+    </svg>`;
+  };
+
+  const getHealthScoreCLI = (status: string, metrics: any): number => {
+    if (status === "Healthy") return 98;
+    let score = 90;
+    if (metrics.cpuMax && metrics.cpuMax > 80) score -= 30;
+    if (metrics.memoryLeakRisk === "High") score -= 35;
+    if (metrics.cacheMissRatio && metrics.cacheMissRatio > 15) score -= 15;
+    if (metrics.workflowFailureRate && metrics.workflowFailureRate > 2) score -= 15;
+    return Math.max(8, score);
+  };
+
   // Export a consolidated Markdown Report
   const reportPath = path.join(process.cwd(), "tririga-analysis-report.md");
   let mdContent = `# 📊 Consolidated IBM TRIRIGA Cluster Diagnostics Report\n\n`;
   mdContent += `*Generated natively via OS Memory CLI Analyzer on ${new Date().toLocaleString()}*\n\n`;
+  
   mdContent += `## 🗃️ Scan Statistics\n\n`;
-  mdContent += `| File Name | File Size | Scanned Lines | Health Status |\n`;
-  mdContent += `| :--- | :--- | :--- | :--- |\n`;
+  mdContent += `| File Name | File Size | Scanned Lines | Health Score | Health Status |\n`;
+  mdContent += `| :--- | :--- | :--- | :--- | :--- |\n`;
 
   results.forEach((r) => {
     const icon = r.status === "Critical" ? "🔴" : r.status === "Degraded" ? "🟡" : "🟢";
-    mdContent += `| **${r.fileName}** | ${r.fileSizeMB.toFixed(2)} MB | ${r.lineCount.toLocaleString()} lines | ${icon} **${r.status}** |\n`;
+    const score = getHealthScoreCLI(r.status, r.metrics);
+    mdContent += `| **${r.fileName}** | ${r.fileSizeMB.toFixed(2)} MB | ${r.lineCount.toLocaleString()} lines | **${score}/100** | ${icon} **${r.status}** |\n`;
   });
 
   mdContent += `\n---\n\n`;
 
   results.forEach((r) => {
+    const score = getHealthScoreCLI(r.status, r.metrics);
+    const m = r.metrics;
+
     mdContent += `## 📄 Diagnostics Breakdown: ${r.fileName}\n\n`;
     mdContent += `> **Executive Summary:** ${r.executiveSummary}\n\n`;
     
-    mdContent += `### 📈 Extracted Telemetry Metrics\n\n`;
-    mdContent += `* **Peak CPU Load:** ${r.metrics.cpuMax !== null ? `${r.metrics.cpuMax.toFixed(1)}%` : "N/A"}\n`;
-    mdContent += `* **JVM Memory Leak Risk:** ${r.metrics.memoryLeakRisk} (Memory Trend: ${r.metrics.memoryTrend})\n`;
-    mdContent += `* **Cache Miss Ratio:** ${r.metrics.cacheMissRatio !== null ? `${r.metrics.cacheMissRatio.toFixed(1)}%` : "N/A"}\n`;
-    mdContent += `* **Workflow Failure Rate:** ${r.metrics.workflowFailureRate !== null ? `${r.metrics.workflowFailureRate.toFixed(1)}% (${r.metrics.totalWorkflowsFailed}/${r.metrics.totalWorkflowsProcessed})` : "N/A"}\n`;
-    mdContent += `* **Avg Response Latency:** ${r.metrics.avgResponseTimeMs !== null ? `${r.metrics.avgResponseTimeMs}ms` : "N/A"}\n\n`;
+    mdContent += `### 📊 Visual Diagnostic Gauges\n`;
+    mdContent += `<div align="center" style="background:#0D1117; padding:24px; border-radius:16px; border:1px solid #30363D; display:flex; flex-wrap:wrap; justify-content:center; gap:16px; margin-bottom:30px;">\n`;
+    mdContent += `  ${generateHealthGaugeSVG(score, r.status)}\n`;
+    mdContent += `  ${generateCpuGaugeSVG(m.cpuMax)}\n`;
+    mdContent += `  ${generateMemoryTrendSVG(m.memoryLeakRisk, m.memoryTrend)}\n`;
+    mdContent += `  ${generateCacheMissSVG(m.cacheMissRatio)}\n`;
+    mdContent += `  ${generateWorkflowFailureSVG(m.workflowFailureRate, m.totalWorkflowsFailed, m.totalWorkflowsProcessed)}\n`;
+    mdContent += `</div>\n\n`;
+
+    mdContent += `### 📈 Extracted Telemetry Metrics Reference\n\n`;
+    mdContent += `| Metric KPI Name | Current Extracted Value | Operating Threshold | Health Assessment Status |\n`;
+    mdContent += `| :--- | :--- | :--- | :--- |\n`;
+    mdContent += `| **Peak CPU Load** | ${m.cpuMax !== null ? `${m.cpuMax.toFixed(1)}%` : "N/A"} | &lt; 80.0% | ${m.cpuMax !== null && m.cpuMax > 80 ? "🔴 CRITICAL EXHAUSTION" : "🟢 HEALTHY"} |\n`;
+    mdContent += `| **JVM Memory Leak Risk** | ${m.memoryLeakRisk} (${m.memoryTrend}) | Low Risk / Stable | ${m.memoryLeakRisk === "High" ? "🔴 HIGH RISK LEAK" : m.memoryLeakRisk === "Medium" ? "🟡 MODERATE RISK" : "🟢 OPTIMAL"} |\n`;
+    mdContent += `| **Cache Miss Ratio** | ${m.cacheMissRatio !== null ? `${m.cacheMissRatio.toFixed(1)}%` : "N/A"} | &lt; 15.0% | ${m.cacheMissRatio !== null && m.cacheMissRatio > 15 ? "🔴 HIGH MISS LATENCY" : "🟢 OPTIMAL"} |\n`;
+    mdContent += `| **Workflow Failure Rate** | ${m.workflowFailureRate !== null ? `${m.workflowFailureRate.toFixed(1)}%` : "0.0%"} | &lt; 2.0% | ${m.workflowFailureRate !== null && m.workflowFailureRate > 2 ? "🔴 UNSTABLE FAILURE RISK" : "🟢 STABLE"} |\n`;
+    mdContent += `| **Avg Response Latency** | ${m.avgResponseTimeMs !== null ? `${m.avgResponseTimeMs}ms` : "N/A"} | &lt; 250ms | ${m.avgResponseTimeMs !== null && m.avgResponseTimeMs > 250 ? "🟡 DEGRADED SLOWNESS" : "🟢 OPTIMAL"} |\n\n`;
 
     if (r.detectedAnomalies.length > 0) {
       mdContent += `### ⚠️ Detected Anomalies\n\n`;

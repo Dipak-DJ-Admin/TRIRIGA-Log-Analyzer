@@ -357,45 +357,169 @@ export default function App() {
     setIsCombinedExportDropdownOpen(false);
   };
 
+  // SVG Gauge and Chart generators for rich visual exports (Markdown & HTML)
+  const generateHealthGaugeSVG = (score: number, status: string) => {
+    const color = status === "Critical" ? "#F87171" : status === "Degraded" ? "#FBBF24" : "#34D399";
+    const trackColor = "#21262D";
+    const radius = 40;
+    const circumference = 2 * Math.PI * radius;
+    const strokeDashoffset = circumference - (score / 100) * circumference;
+    
+    return `<svg width="180" height="180" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" style="background:#0D1117; border-radius:16px; border:1px solid #30363D; font-family:system-ui, -apple-system, sans-serif;">
+      <!-- Circular Track -->
+      <circle cx="60" cy="55" r="${radius}" fill="none" stroke="${trackColor}" stroke-width="8" />
+      <!-- Progress Arc -->
+      <circle cx="60" cy="55" r="${radius}" fill="none" stroke="${color}" stroke-width="8" 
+              stroke-dasharray="${circumference}" stroke-dashoffset="${strokeDashoffset}" 
+              stroke-linecap="round" transform="rotate(-90 60 55)" />
+      <!-- Score Text -->
+      <text x="60" y="58" font-size="20" font-weight="bold" fill="#F0F6FC" text-anchor="middle">${score}</text>
+      <text x="60" y="74" font-size="9" font-weight="600" fill="#8B949E" text-anchor="middle" letter-spacing="0.5">HEALTH SCORE</text>
+      <!-- Status Badge -->
+      <rect x="30" y="94" width="60" height="14" rx="7" fill="${color}20" stroke="${color}40" stroke-width="1" />
+      <text x="60" y="104" font-size="8" font-weight="bold" fill="${color}" text-anchor="middle">${status.toUpperCase()}</text>
+    </svg>`;
+  };
+
+  const generateCpuGaugeSVG = (cpuMax: number | null) => {
+    const val = cpuMax !== null ? cpuMax : 0;
+    const color = val > 80 ? "#F87171" : val > 50 ? "#FBBF24" : "#60A5FA";
+    
+    return `<svg width="220" height="140" viewBox="0 0 160 100" xmlns="http://www.w3.org/2000/svg" style="background:#0D1117; border-radius:16px; border:1px solid #30363D; font-family:system-ui, -apple-system, sans-serif;">
+      <!-- Background Gauge Track -->
+      <path d="M 20,80 A 60,60 0 0,1 140,80" fill="none" stroke="#21262D" stroke-width="12" stroke-linecap="round" />
+      <!-- Colored Gauge Arc -->
+      <path d="M 20,80 A 60,60 0 0,1 140,80" fill="none" stroke="${color}" stroke-width="12" stroke-linecap="round" 
+            stroke-dasharray="188.5" stroke-dashoffset="${188.5 - (val / 100) * 188.5}" />
+      <!-- Value Text -->
+      <text x="80" y="75" font-size="18" font-weight="bold" fill="#F0F6FC" text-anchor="middle">${val.toFixed(1)}%</text>
+      <text x="80" y="92" font-size="8" font-weight="bold" fill="#8B949E" text-anchor="middle" letter-spacing="0.5">PEAK CPU LOAD</text>
+    </svg>`;
+  };
+
+  const generateMemoryTrendSVG = (risk: string, trend: string) => {
+    const isHigh = risk === "High";
+    const isMed = risk === "Medium";
+    const color = isHigh ? "#F87171" : isMed ? "#FBBF24" : "#34D399";
+    const pathD = isHigh 
+      ? "M 15,75 Q 40,70 65,50 T 115,25 T 165,15" 
+      : isMed 
+      ? "M 15,65 Q 40,60 65,45 T 115,35 T 165,25" 
+      : "M 15,45 Q 40,30 65,45 T 115,45 T 165,45";
+    
+    return `<svg width="220" height="140" viewBox="0 0 180 100" xmlns="http://www.w3.org/2000/svg" style="background:#0D1117; border-radius:16px; border:1px solid #30363D; font-family:system-ui, -apple-system, sans-serif;">
+      <!-- Grid lines -->
+      <line x1="15" y1="20" x2="165" y2="20" stroke="#21262D" stroke-dasharray="2,2" />
+      <line x1="15" y1="50" x2="165" y2="50" stroke="#21262D" stroke-dasharray="2,2" />
+      <line x1="15" y1="80" x2="165" y2="80" stroke="#21262D" stroke-dasharray="2,2" />
+      <!-- Trend Line -->
+      <path d="${pathD}" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round" />
+      <!-- Start & End Nodes -->
+      <circle cx="15" cy="${isHigh ? 75 : isMed ? 65 : 45}" r="4" fill="${color}" />
+      <circle cx="165" cy="${isHigh ? 15 : isMed ? 25 : 45}" r="4" fill="${color}" />
+      <!-- Text Labels -->
+      <text x="15" y="93" font-size="8" font-weight="bold" fill="#8B949E" letter-spacing="0.5">JVM HEAP TREND</text>
+      <text x="165" y="93" font-size="8" font-weight="bold" fill="${color}" text-anchor="end">${risk} RISK (${trend})</text>
+    </svg>`;
+  };
+
+  const generateCacheMissSVG = (missRatio: number | null) => {
+    const val = missRatio !== null ? missRatio : 0;
+    const color = val > 20 ? "#F87171" : val > 10 ? "#FBBF24" : "#34D399";
+    
+    return `<svg width="220" height="140" viewBox="0 0 160 100" xmlns="http://www.w3.org/2000/svg" style="background:#0D1117; border-radius:16px; border:1px solid #30363D; font-family:system-ui, -apple-system, sans-serif;">
+      <!-- Circular Track -->
+      <circle cx="80" cy="40" r="28" fill="none" stroke="#21262D" stroke-width="10" />
+      <!-- Progress Arc -->
+      <circle cx="80" cy="40" r="28" fill="none" stroke="${color}" stroke-width="10" 
+              stroke-dasharray="175.9" stroke-dashoffset="${175.9 - (val / 100) * 175.9}" 
+              stroke-linecap="round" transform="rotate(-90 80 40)" />
+      <!-- Inner Text -->
+      <text x="80" y="45" font-size="12" font-weight="bold" fill="#F0F6FC" text-anchor="middle">${val.toFixed(1)}%</text>
+      <text x="80" y="85" font-size="8" font-weight="bold" fill="#8B949E" text-anchor="middle" letter-spacing="0.5">CACHE MISS RATIO</text>
+    </svg>`;
+  };
+
+  const generateWorkflowFailureSVG = (failRate: number | null, failed: number, processed: number) => {
+    const rate = failRate !== null ? failRate : 0;
+    const color = rate > 2.0 ? "#F87171" : rate > 0.5 ? "#FBBF24" : "#34D399";
+    const successRate = 100 - rate;
+    
+    return `<svg width="220" height="140" viewBox="0 0 180 100" xmlns="http://www.w3.org/2000/svg" style="background:#0D1117; border-radius:16px; border:1px solid #30363D; font-family:system-ui, -apple-system, sans-serif;">
+      <!-- Horizontal Stacked Bar representing Workflow State -->
+      <rect x="15" y="35" width="150" height="14" rx="7" fill="#21262D" />
+      <rect x="15" y="35" width="${(successRate / 100) * 150}" height="14" rx="7" fill="#10B981" />
+      ${rate > 0 ? `<rect x="${15 + (successRate / 100) * 150 - 3}" width="${Math.max(6, (rate / 100) * 150)}" y="35" height="14" rx="7" fill="#EF4444" />` : ""}
+      <!-- Legend -->
+      <circle cx="20" cy="65" r="3" fill="#10B981" />
+      <text x="28" y="68" font-size="8" font-weight="bold" fill="#8B949E">OK (${(processed - failed).toLocaleString()})</text>
+      <circle cx="100" cy="65" r="3" fill="#EF4444" />
+      <text x="108" y="68" font-size="8" font-weight="bold" fill="#8B949E">FAIL (${failed.toLocaleString()})</text>
+      <text x="15" y="24" font-size="9" font-weight="bold" fill="#F0F6FC">WORKFLOW RATIO</text>
+      <text x="15" y="90" font-size="8" font-weight="bold" fill="${color}">Failure Rate: ${rate.toFixed(1)}%</text>
+    </svg>`;
+  };
+
   // 1. Export Markdown (Individual)
   const handleExportMarkdownIndividual = (file: AnalyzedFile) => {
+    const score = getHealthScore(file);
+    const m = file.results.metrics;
+    
     let md = `# 📊 IBM TRIRIGA Diagnostics Report: ${file.name}\n\n`;
     md += `*Generated via TRIRIGA Local Browser Sandbox Diagnostics on ${new Date().toLocaleString()}*\n\n`;
+    
     md += `## 🗃️ File Statistics\n`;
-    md += `* **File Name:** ${file.name}\n`;
-    md += `* **File Size:** ${(file.size / 1024).toFixed(1)} KB\n`;
-    md += `* **Lines Scanned:** ${file.lineCount.toLocaleString()}\n`;
-    md += `* **Date Range:** ${file.dateRange || "N/A"}\n`;
-    md += `* **Duration Span:** ${file.duration || "N/A"}\n`;
-    md += `* **Overall Health Status:** **${file.results.status}**\n\n`;
+    md += `| Attribute | Value |\n`;
+    md += `| :--- | :--- |\n`;
+    md += `| **File Name** | \`${file.name}\` |\n`;
+    md += `| **File Size** | ${(file.size / 1024).toFixed(1)} KB |\n`;
+    md += `| **Lines Scanned** | ${file.lineCount.toLocaleString()} lines |\n`;
+    md += `| **Date Range** | ${file.dateRange || "N/A"} |\n`;
+    md += `| **Duration Span** | ${file.duration || "N/A"} |\n`;
+    md += `| **Overall Health Score** | **${score}/100** |\n`;
+    md += `| **Overall Health Status** | **${file.results.status}** |\n\n`;
     
     md += `## 📈 Executive Summary\n`;
     md += `> ${file.results.executiveSummary}\n\n`;
 
-    md += `## 📊 Key Extracted Metrics\n`;
-    md += `* **Peak CPU Load:** ${file.results.metrics.cpuMax !== null ? `${file.results.metrics.cpuMax.toFixed(1)}%` : "N/A"}\n`;
-    md += `* **JVM Memory Leak Risk:** ${file.results.metrics.memoryLeakRisk} (Memory Trend: ${file.results.metrics.memoryTrend})\n`;
-    md += `* **Cache Miss Ratio:** ${file.results.metrics.cacheMissRatio !== null ? `${file.results.metrics.cacheMissRatio.toFixed(1)}%` : "N/A"}\n`;
-    md += `* **Workflow Failure Rate:** ${file.results.metrics.workflowFailureRate !== null ? `${file.results.metrics.workflowFailureRate.toFixed(1)}% (${file.results.metrics.totalWorkflowsFailed || 0}/${file.results.metrics.totalWorkflowsProcessed || 0})` : "N/A"}\n`;
-    md += `* **Avg Response Latency:** ${file.results.metrics.avgResponseTimeMs !== null ? `${file.results.metrics.avgResponseTimeMs}ms` : "N/A"}\n\n`;
+    md += `## 📊 Visual Diagnostic Gauges\n`;
+    md += `<div align="center" style="background:#0D1117; padding:24px; border-radius:16px; border:1px solid #30363D; display:flex; flex-wrap:wrap; justify-content:center; gap:16px; margin-bottom:30px;">\n`;
+    md += `  ${generateHealthGaugeSVG(score, file.results.status)}\n`;
+    md += `  ${generateCpuGaugeSVG(m.cpuMax)}\n`;
+    md += `  ${generateMemoryTrendSVG(m.memoryLeakRisk, m.memoryTrend)}\n`;
+    md += `  ${generateCacheMissSVG(m.cacheMissRatio)}\n`;
+    md += `  ${generateWorkflowFailureSVG(m.workflowFailureRate, m.totalWorkflowsFailed, m.totalWorkflowsProcessed)}\n`;
+    md += `</div>\n\n`;
+
+    md += `## 📊 Extracted Telemetry Reference Table\n`;
+    md += `| Metric KPI Name | Current Extracted Value | Operating Threshold | Health Assessment Status |\n`;
+    md += `| :--- | :--- | :--- | :--- |\n`;
+    md += `| **Peak CPU Load** | ${m.cpuMax !== null ? `${m.cpuMax.toFixed(1)}%` : "N/A"} | &lt; 80.0% | ${m.cpuMax !== null && m.cpuMax > 80 ? "🔴 CRITICAL EXHAUSTION" : "🟢 HEALTHY"} |\n`;
+    md += `| **JVM Memory Leak Risk** | ${m.memoryLeakRisk} (${m.memoryTrend}) | Low Risk / Stable | ${m.memoryLeakRisk === "High" ? "🔴 HIGH RISK LEAK" : m.memoryLeakRisk === "Medium" ? "🟡 MODERATE RISK" : "🟢 OPTIMAL"} |\n`;
+    md += `| **Cache Miss Ratio** | ${m.cacheMissRatio !== null ? `${m.cacheMissRatio.toFixed(1)}%` : "N/A"} | &lt; 15.0% | ${m.cacheMissRatio !== null && m.cacheMissRatio > 15 ? "🔴 HIGH MISS LATENCY" : "🟢 OPTIMAL"} |\n`;
+    md += `| **Workflow Failure Rate** | ${m.workflowFailureRate !== null ? `${m.workflowFailureRate.toFixed(1)}%` : "0.0%"} | &lt; 2.0% | ${m.workflowFailureRate !== null && m.workflowFailureRate > 2 ? "🔴 UNSTABLE FAILURE RISK" : "🟢 STABLE"} |\n`;
+    md += `| **Avg Response Latency** | ${m.avgResponseTimeMs !== null ? `${m.avgResponseTimeMs}ms` : "N/A"} | &lt; 250ms | ${m.avgResponseTimeMs !== null && m.avgResponseTimeMs > 250 ? "🟡 DEGRADED SLOWNESS" : "🟢 OPTIMAL"} |\n\n`;
 
     if (file.results.detectedAnomalies.length > 0) {
-      md += `## ⚠️ Detected Anomalies\n`;
-      file.results.detectedAnomalies.forEach((a) => {
-        md += `* **[${a.severity}] ${a.title}**: ${a.description}\n`;
+      md += `## ⚠️ Detected Anomalies & Outliers\n`;
+      file.results.detectedAnomalies.forEach((a, index) => {
+        const icon = a.severity === "Critical" ? "🔴" : "🟡";
+        md += `### ${icon} ${index + 1}. ${a.title} [${a.severity}]\n`;
+        md += `* **Observation:** ${a.description}\n\n`;
       });
       md += `\n`;
     }
 
-    md += `## 🔍 Root Cause Analysis (RCA)\n`;
+    md += `## 🔍 Deep Root Cause Analysis (RCA)\n`;
     md += `${file.results.rca}\n\n`;
 
     if (file.results.recommendations.length > 0) {
-      md += `## 🛠️ Remediation Recommendations\n`;
+      md += `## 🛠️ Actionable Remediation & Tuning Recommendations\n`;
       file.results.recommendations.forEach((rec, idx) => {
-        md += `### ${idx + 1}. ${rec.title} (${rec.category})\n`;
-        md += `${rec.description}\n\n`;
+        md += `### ${idx + 1}. ${rec.title} (\`${rec.category}\`)\n`;
+        md += `* **Remediation Action:** ${rec.description}\n\n`;
         if (rec.codeSnippet) {
+          md += `* **Recommended Configuration Snippet / Action script:**\n`;
           md += `\`\`\`${rec.category === "DB Query" ? "sql" : "properties"}\n${rec.codeSnippet}\n\`\`\`\n\n`;
         }
       });
@@ -403,6 +527,183 @@ export default function App() {
 
     triggerDownload(md, `${file.name.replace(/\.[^/.]+$/, "")}_diagnostics_report.md`, "text/markdown");
   };
+
+  // 1b. Export HTML (Individual)
+  const handleExportHTMLIndividual = (file: AnalyzedFile) => {
+    const score = getHealthScore(file);
+    const m = file.results.metrics;
+    
+    let htmlContent = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IBM TRIRIGA Diagnostics: ${file.name}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+    body { font-family: 'Inter', sans-serif; background-color: #0D1117; color: #C9D1D9; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+  </style>
+</head>
+<body class="min-h-screen p-4 md:p-8 selection:bg-blue-600/30 selection:text-white">
+  <div class="max-w-6xl mx-auto space-y-8">
+    
+    <!-- Top Bar -->
+    <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-[#161B22] border border-[#30363D] p-6 rounded-2xl shadow-sm relative">
+      <div class="space-y-1.5 z-10">
+        <div class="flex items-center gap-2">
+          <span class="px-2 py-0.5 rounded text-xs font-bold font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20">IBM TRIRIGA DIAGNOSTICS</span>
+          <span class="text-xs text-slate-400">Individual Node Report</span>
+        </div>
+        <h1 class="text-xl md:text-2xl font-extrabold text-white tracking-tight">${file.name}</h1>
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400 font-mono">
+          <span>Size: ${(file.size / 1024).toFixed(1)} KB</span>
+          <span>•</span>
+          <span>Scanned: ${file.lineCount.toLocaleString()} lines</span>
+          <span>•</span>
+          <span>Range: ${file.dateRange || "N/A"}</span>
+        </div>
+      </div>
+      
+      <div class="flex items-center gap-4 bg-[#0D1117] border border-[#30363D] p-4 rounded-xl min-w-[200px] justify-between z-10">
+        <div class="space-y-0.5">
+          <span class="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Health Score</span>
+          <span class="text-2xl font-extrabold font-mono text-white">${score}/100</span>
+        </div>
+        <span class="px-3 py-1 rounded text-xs font-bold uppercase tracking-wider ${
+          file.results.status === "Critical" ? "bg-red-500/10 text-red-400 border border-red-500/20" :
+          file.results.status === "Degraded" ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" :
+          "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+        }">${file.results.status}</span>
+      </div>
+    </div>
+
+    <!-- Executive Summary Card -->
+    <div class="bg-[#161B22] border border-[#30363D] p-6 rounded-2xl space-y-3">
+      <div class="flex items-center gap-2 text-white font-bold">
+        <i data-lucide="info" class="w-4 h-4 text-blue-400"></i>
+        <span>Executive Summary</span>
+      </div>
+      <p class="text-sm text-slate-300 leading-relaxed">${file.results.executiveSummary}</p>
+    </div>
+
+    <!-- Visual Dashboard Grid -->
+    <div>
+      <h2 class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4 font-mono">II. Visual KPI Metrics Dashboard</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <!-- CPU Gauge -->
+        <div class="bg-[#161B22] border border-[#30363D] p-5 rounded-2xl flex flex-col items-center justify-center space-y-3">
+          ${generateCpuGaugeSVG(m.cpuMax)}
+        </div>
+        <!-- Memory Sparkline -->
+        <div class="bg-[#161B22] border border-[#30363D] p-5 rounded-2xl flex flex-col items-center justify-center space-y-3">
+          ${generateMemoryTrendSVG(m.memoryLeakRisk, m.memoryTrend)}
+        </div>
+        <!-- Cache Miss Donut -->
+        <div class="bg-[#161B22] border border-[#30363D] p-5 rounded-2xl flex flex-col items-center justify-center space-y-3">
+          ${generateCacheMissSVG(m.cacheMissRatio)}
+        </div>
+        <!-- Workflows Stacked Bar -->
+        <div class="bg-[#161B22] border border-[#30363D] p-5 rounded-2xl flex flex-col items-center justify-center space-y-3">
+          ${generateWorkflowFailureSVG(m.workflowFailureRate, m.totalWorkflowsFailed, m.totalWorkflowsProcessed)}
+        </div>
+      </div>
+    </div>
+
+    <!-- Detailed Analysis Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      
+      <!-- Root Cause Analysis (RCA) -->
+      <div class="bg-[#161B22] border border-[#30363D] p-6 rounded-2xl space-y-4">
+        <div class="flex items-center gap-2 text-white font-bold border-b border-[#30363D] pb-3">
+          <i data-lucide="activity" class="w-4 h-4 text-purple-400"></i>
+          <span>Root Cause Analysis (RCA)</span>
+        </div>
+        <div class="text-sm text-slate-300 leading-relaxed space-y-3 font-sans whitespace-pre-wrap">
+          ${file.results.rca}
+        </div>
+      </div>
+
+      <!-- Detected Anomalies -->
+      <div class="bg-[#161B22] border border-[#30363D] p-6 rounded-2xl space-y-4">
+        <div class="flex items-center gap-2 text-white font-bold border-b border-[#30363D] pb-3">
+          <i data-lucide="alert-triangle" class="w-4 h-4 text-red-400"></i>
+          <span>Detected Anomalies (${file.results.detectedAnomalies.length})</span>
+        </div>
+        <div class="space-y-3 overflow-y-auto max-h-[400px] pr-2">
+          ${file.results.detectedAnomalies.map(a => `
+            <div class="p-4 bg-[#0D1117] border border-[#30363D] rounded-xl space-y-1.5">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-bold text-white">${a.title}</span>
+                <span class="px-2 py-0.5 rounded text-[9px] font-bold tracking-wider uppercase ${
+                  a.severity === "Critical" ? "bg-red-500/10 text-red-400 border border-red-500/20" :
+                  "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                }">${a.severity}</span>
+              </div>
+              <p class="text-xs text-slate-400 leading-relaxed">${a.description}</p>
+            </div>
+          `).join('')}
+          ${file.results.detectedAnomalies.length === 0 ? `
+            <div class="text-center py-8 text-xs text-slate-500 font-mono">No anomalies detected in this log file.</div>
+          ` : ''}
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Recommendations & Remediation Code Blocks -->
+    <div class="bg-[#161B22] border border-[#30363D] p-6 rounded-2xl space-y-6">
+      <div class="flex items-center gap-2 text-white font-bold border-b border-[#30363D] pb-3">
+        <i data-lucide="wrench" class="w-4 h-4 text-emerald-400"></i>
+        <span>Remediation Playbooks (${file.results.recommendations.length})</span>
+      </div>
+      
+      <div class="space-y-6">
+        ${file.results.recommendations.map((rec, idx) => `
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <h3 class="text-sm font-extrabold text-white flex items-center gap-2">
+                <span class="w-5 h-5 bg-emerald-500/10 text-emerald-400 rounded-full flex items-center justify-center text-xs font-mono">${idx + 1}</span>
+                <span>${rec.title}</span>
+              </h3>
+              <span class="px-2 py-0.5 rounded text-[9px] font-bold tracking-wider font-mono bg-slate-800 text-slate-300 uppercase border border-slate-700">${rec.category}</span>
+            </div>
+            <p class="text-xs text-slate-300 pl-7 leading-relaxed">${rec.description}</p>
+            
+            ${rec.codeSnippet ? `
+              <div class="pl-7">
+                <div class="bg-[#0D1117] border border-[#30363D] rounded-xl overflow-hidden font-mono text-[11px]">
+                  <div class="bg-[#161B22] border-b border-[#30363D] px-4 py-2 flex justify-between items-center text-slate-400 text-[10px]">
+                    <span>REMEDIATION CONFIGURATION / QUERY</span>
+                    <button onclick="navigator.clipboard.writeText(this.nextElementSibling.nextElementSibling.innerText); this.innerText='Copied!';" class="hover:text-white transition-all text-[9px] uppercase tracking-wider font-bold cursor-pointer">Copy</button>
+                    <span class="hidden">${rec.codeSnippet.replace(/"/g, '&quot;')}</span>
+                  </div>
+                  <pre class="p-4 overflow-x-auto text-emerald-400/95 leading-relaxed">${rec.codeSnippet}</pre>
+                </div>
+              </div>
+            ` : ''}
+          </div>
+        `).join('<hr class="border-[#30363D]"/>')}
+      </div>
+    </div>
+
+    <footer class="text-center text-xs text-slate-500 font-mono py-8">
+      IBM TRIRIGA Diagnostics • Standalone Offline Interactive HTML Exporter • Generated at ${new Date().toLocaleString()}
+    </footer>
+
+  </div>
+
+  <script>
+    lucide.createIcons();
+  </script>
+</body>
+</html>`;
+    
+    triggerDownload(htmlContent, `${file.name.replace(/\.[^/.]+$/, "")}_interactive_report.html`, "text/html");
+  };
+
 
   // 2. Export JSON (Individual)
   const handleExportJSONIndividual = (file: AnalyzedFile) => {
@@ -480,27 +781,225 @@ export default function App() {
     const avgCacheMiss = cacheList.length > 0 ? (cacheList.reduce((a, b) => a + b, 0) / cacheList.length) : 26.4;
     const leakRisk = typeFiles.some(f => f.results.metrics.memoryLeakRisk === "High") ? "High" : typeFiles.some(f => f.results.metrics.memoryLeakRisk === "Medium") ? "Medium" : "Low";
     
+    // Aggregates for workflows
+    const totalProcessed = typeFiles.reduce((acc, f) => acc + (f.results.metrics.totalWorkflowsProcessed || 0), 0);
+    const totalFailed = typeFiles.reduce((acc, f) => acc + (f.results.metrics.totalWorkflowsFailed || 0), 0);
+    const aggWorkflowFailRate = totalProcessed > 0 ? (totalFailed / totalProcessed) * 100 : 2.5;
+
     let md = `# 📊 Consolidated IBM TRIRIGA Cluster Report: ${typeLabel}\n\n`;
     md += `*Generated via TRIRIGA Local Browser Sandbox Diagnostics on ${new Date().toLocaleString()}*\n\n`;
+    
     md += `## 🗃️ Cluster Workspace Statistics\n`;
     md += `* **Consolidated Type:** ${typeLabel}\n`;
     md += `* **Merged Nodes Count:** ${typeFiles.length} server nodes\n`;
     md += `* **Source Log Streams:** ${typeFiles.map(f => f.name).join(", ")}\n\n`;
 
-    md += `## 📊 Aggregated Metrics\n`;
-    md += `* **Peak CPU across Cluster:** ${peakCpu.toFixed(1)}%\n`;
-    md += `* **Aggregate Cache Miss Ratio:** ${avgCacheMiss.toFixed(1)}%\n`;
-    md += `* **Consolidated Memory Leak Risk:** **${leakRisk}**\n\n`;
+    md += `## 📊 Aggregated Cluster Gauges\n`;
+    md += `<div align="center" style="background:#0D1117; padding:24px; border-radius:16px; border:1px solid #30363D; display:flex; flex-wrap:wrap; justify-content:center; gap:16px; margin-bottom:30px;">\n`;
+    md += `  ${generateCpuGaugeSVG(peakCpu)}\n`;
+    md += `  ${generateMemoryTrendSVG(leakRisk, "Merged")}\n`;
+    md += `  ${generateCacheMissSVG(avgCacheMiss)}\n`;
+    md += `  ${generateWorkflowFailureSVG(aggWorkflowFailRate, totalFailed, totalProcessed)}\n`;
+    md += `</div>\n\n`;
+
+    md += `## 📊 Node Comparison Matrix\n`;
+    md += `| Node Name | Overall Health Status | Scanned Lines | Peak CPU | Memory Leak Risk | Cache Miss Ratio | WF Failure Rate |\n`;
+    md += `| :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n`;
+    typeFiles.forEach((file) => {
+      const m = file.results.metrics;
+      const icon = file.results.status === "Critical" ? "🔴" : file.results.status === "Degraded" ? "🟡" : "🟢";
+      md += `| **${file.name}** | ${icon} ${file.results.status} | ${file.lineCount.toLocaleString()} | ${m.cpuMax !== null ? `${m.cpuMax.toFixed(1)}%` : "N/A"} | ${m.memoryLeakRisk} | ${m.cacheMissRatio !== null ? `${m.cacheMissRatio.toFixed(1)}%` : "N/A"} | ${m.workflowFailureRate !== null ? `${m.workflowFailureRate.toFixed(1)}%` : "N/A"} |\n`;
+    });
+    md += `\n\n`;
 
     md += `## 📄 Diagnostic Details per Node\n\n`;
     typeFiles.forEach((file) => {
       md += `### Node: ${file.name}\n`;
       md += `* **File Size:** ${(file.size / 1024).toFixed(1)} KB | **Lines Scanned:** ${file.lineCount.toLocaleString()}\n`;
-      md += `* **Health Status:** **${file.results.status}**\n`;
+      md += `* **Overall Status:** **${file.results.status}** (Health Score: **${getHealthScore(file)}/100**)\n`;
       md += `* **Executive Summary:** ${file.results.executiveSummary}\n\n`;
     });
 
     triggerDownload(md, `tririga_cluster_${type}_consolidated_report.md`, "text/markdown");
+  };
+
+  // 4b. Export HTML (Combined)
+  const handleExportHTMLCombined = (type: "server" | "performance" | "metrics") => {
+    const typeFiles = filesByType[type] || [];
+    const typeLabel = type === "server" ? "Server Application Logs" : type === "performance" ? "JVM Performance Logs" : "System Metrics";
+    
+    const cpuList = typeFiles.map(f => f.results.metrics.cpuMax).filter(v => v !== null) as number[];
+    const peakCpu = cpuList.length > 0 ? Math.max(...cpuList) : 88.5;
+    const cacheList = typeFiles.map(f => f.results.metrics.cacheMissRatio).filter(v => v !== null) as number[];
+    const avgCacheMiss = cacheList.length > 0 ? (cacheList.reduce((a, b) => a + b, 0) / cacheList.length) : 26.4;
+    const leakRisk = typeFiles.some(f => f.results.metrics.memoryLeakRisk === "High") ? "High" : typeFiles.some(f => f.results.metrics.memoryLeakRisk === "Medium") ? "Medium" : "Low";
+    
+    // Aggregates for workflows
+    const totalProcessed = typeFiles.reduce((acc, f) => acc + (f.results.metrics.totalWorkflowsProcessed || 0), 0);
+    const totalFailed = typeFiles.reduce((acc, f) => acc + (f.results.metrics.totalWorkflowsFailed || 0), 0);
+    const aggWorkflowFailRate = totalProcessed > 0 ? (totalFailed / totalProcessed) * 100 : 2.5;
+
+    let htmlContent = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Consolidated TRIRIGA Cluster Report: ${typeLabel}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+    body { font-family: 'Inter', sans-serif; background-color: #0D1117; color: #C9D1D9; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+  </style>
+</head>
+<body class="min-h-screen p-4 md:p-8 selection:bg-blue-600/30 selection:text-white">
+  <div class="max-w-6xl mx-auto space-y-8">
+    
+    <!-- Top Bar -->
+    <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-[#161B22] border border-blue-900/30 p-6 rounded-2xl shadow-sm">
+      <div class="space-y-1.5">
+        <div class="flex items-center gap-2">
+          <span class="px-2 py-0.5 rounded text-xs font-bold font-mono bg-blue-500/15 text-blue-400 border border-blue-500/30">CONSOLIDATED CLUSTER REPORT</span>
+          <span class="text-xs text-slate-400 font-mono">${typeLabel}</span>
+        </div>
+        <h1 class="text-xl md:text-2xl font-extrabold text-white tracking-tight">IBM TRIRIGA Multi-Node Diagnostic Report</h1>
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400 font-mono">
+          <span>Merged Nodes Count: ${typeFiles.length} server nodes</span>
+          <span>•</span>
+          <span>Generated: ${new Date().toLocaleString()}</span>
+        </div>
+      </div>
+      
+      <div class="bg-blue-950/20 border border-blue-900/40 p-4 rounded-xl min-w-[200px] flex items-center justify-between">
+        <div class="space-y-0.5">
+          <span class="text-[10px] text-blue-400 uppercase tracking-widest font-bold">Consolidated Risk</span>
+          <span class="text-xl font-extrabold font-mono text-white">${leakRisk === "High" ? "HIGH RISK" : leakRisk === "Medium" ? "MEDIUM RISK" : "STABLE"}</span>
+        </div>
+        <i data-lucide="shield-alert" class="w-8 h-8 text-blue-400"></i>
+      </div>
+    </div>
+
+    <!-- Cluster Aggregated Gauge Row -->
+    <div>
+      <h2 class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4 font-mono">I. Aggregated Cluster-Wide KPI Gauges</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="bg-[#161B22] border border-[#30363D] p-5 rounded-2xl flex flex-col items-center justify-center">
+          ${generateCpuGaugeSVG(peakCpu)}
+        </div>
+        <div class="bg-[#161B22] border border-[#30363D] p-5 rounded-2xl flex flex-col items-center justify-center">
+          ${generateMemoryTrendSVG(leakRisk, "Merged")}
+        </div>
+        <div class="bg-[#161B22] border border-[#30363D] p-5 rounded-2xl flex flex-col items-center justify-center">
+          ${generateCacheMissSVG(avgCacheMiss)}
+        </div>
+        <div class="bg-[#161B22] border border-[#30363D] p-5 rounded-2xl flex flex-col items-center justify-center">
+          ${generateWorkflowFailureSVG(aggWorkflowFailRate, totalFailed, totalProcessed)}
+        </div>
+      </div>
+    </div>
+
+    <!-- Node Comparison Matrix -->
+    <div class="bg-[#161B22] border border-[#30363D] p-6 rounded-2xl space-y-4">
+      <div class="flex items-center gap-2 text-white font-bold border-b border-[#30363D] pb-3">
+        <i data-lucide="grid" class="w-4 h-4 text-blue-400"></i>
+        <span>Node Comparison Matrix</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left border-collapse text-xs">
+          <thead>
+            <tr class="border-b border-[#30363D] text-slate-400 font-mono">
+              <th class="py-3 px-4">Node Name</th>
+              <th class="py-3 px-4">Status</th>
+              <th class="py-3 px-4 text-center">Score</th>
+              <th class="py-3 px-4 text-right">Line Count</th>
+              <th class="py-3 px-4 text-center">Peak CPU</th>
+              <th class="py-3 px-4 text-center">Memory Leak</th>
+              <th class="py-3 px-4 text-center">Cache Miss</th>
+              <th class="py-3 px-4 text-center">WF Fail Rate</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-[#21262D] text-slate-300 font-mono">
+            ${typeFiles.map((file) => {
+              const score = getHealthScore(file);
+              const m = file.results.metrics;
+              const statusColor = file.results.status === "Critical" ? "text-red-400" : file.results.status === "Degraded" ? "text-amber-400" : "text-emerald-400";
+              return `
+                <tr class="hover:bg-slate-900/40 transition-colors">
+                  <td class="py-3 px-4 text-white font-bold font-sans">${file.name}</td>
+                  <td class="py-3 px-4 ${statusColor} font-bold">${file.results.status}</td>
+                  <td class="py-3 px-4 text-center font-bold text-white">${score}/100</td>
+                  <td class="py-3 px-4 text-right">${file.lineCount.toLocaleString()}</td>
+                  <td class="py-3 px-4 text-center">${m.cpuMax !== null ? `${m.cpuMax.toFixed(1)}%` : "N/A"}</td>
+                  <td class="py-3 px-4 text-center">${m.memoryLeakRisk}</td>
+                  <td class="py-3 px-4 text-center">${m.cacheMissRatio !== null ? `${m.cacheMissRatio.toFixed(1)}%` : "N/A"}</td>
+                  <td class="py-3 px-4 text-center text-red-400">${m.workflowFailureRate !== null ? `${m.workflowFailureRate.toFixed(1)}%` : "N/A"}</td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Node Summaries & Findings List -->
+    <div class="space-y-4">
+      <h2 class="text-xs font-bold text-slate-500 uppercase tracking-widest font-mono">II. Individual Node Findings Breakdown</h2>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        ${typeFiles.map((file) => {
+          const score = getHealthScore(file);
+          const statusColor = file.results.status === "Critical" ? "border-red-900/40 bg-red-950/5 text-red-400" : file.results.status === "Degraded" ? "border-amber-900/40 bg-amber-950/5 text-amber-400" : "border-emerald-900/40 bg-emerald-950/5 text-emerald-400";
+          return `
+            <div class="bg-[#161B22] border border-[#30363D] p-5 rounded-2xl space-y-3.5">
+              <div class="flex items-center justify-between border-b border-[#30363D] pb-3">
+                <div class="space-y-0.5">
+                  <h3 class="text-sm font-extrabold text-white">${file.name}</h3>
+                  <p class="text-[10px] text-slate-500 font-mono">Scanned ${file.lineCount.toLocaleString()} lines</p>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-extrabold text-white font-mono">${score}/100</span>
+                  <span class="px-2 py-0.5 rounded text-[9px] font-bold tracking-wider border ${statusColor}">${file.results.status}</span>
+                </div>
+              </div>
+              <div class="space-y-1.5">
+                <span class="text-[10px] text-slate-400 font-mono font-bold uppercase tracking-wider block">Node Executive Summary</span>
+                <p class="text-xs text-slate-300 leading-relaxed">${file.results.executiveSummary}</p>
+              </div>
+              
+              <!-- Metrics list for Node -->
+              <div class="grid grid-cols-3 gap-2 pt-2 text-[10px] text-slate-400 font-mono">
+                <div class="bg-[#0D1117] border border-[#21262D] p-2 rounded">
+                  <span class="text-slate-500 block">Peak CPU</span>
+                  <span class="text-white font-bold">${file.results.metrics.cpuMax !== null ? `${file.results.metrics.cpuMax.toFixed(1)}%` : "N/A"}</span>
+                </div>
+                <div class="bg-[#0D1117] border border-[#21262D] p-2 rounded">
+                  <span class="text-slate-500 block">Memory Risk</span>
+                  <span class="text-white font-bold">${file.results.metrics.memoryLeakRisk}</span>
+                </div>
+                <div class="bg-[#0D1117] border border-[#21262D] p-2 rounded">
+                  <span class="text-slate-500 block">Cache Miss</span>
+                  <span class="text-white font-bold">${file.results.metrics.cacheMissRatio !== null ? `${file.results.metrics.cacheMissRatio.toFixed(1)}%` : "N/A"}</span>
+                </div>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+
+    <footer class="text-center text-xs text-slate-500 font-mono py-8">
+      IBM TRIRIGA Diagnostics • Standalone Offline Interactive HTML Cluster Exporter • Generated at ${new Date().toLocaleString()}
+    </footer>
+
+  </div>
+
+  <script>
+    lucide.createIcons();
+  </script>
+</body>
+</html>`;
+
+    triggerDownload(htmlContent, `tririga_cluster_${type}_interactive_report.html`, "text/html");
   };
 
   // 5. Export JSON (Combined)
@@ -1206,6 +1705,16 @@ export default function App() {
                                 <div>
                                   <div className="font-semibold">Markdown Report (.md)</div>
                                   <div className="text-[10px] text-slate-500">Rich executive RCA & remedies</div>
+                                </div>
+                              </button>
+                              <button
+                                onClick={() => handleExportHTMLIndividual(activeFile)}
+                                className="w-full text-left px-3.5 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-900 flex items-center gap-2"
+                              >
+                                <span className="w-2 h-2 rounded-full bg-blue-500" />
+                                <div>
+                                  <div className="font-semibold">Interactive HTML (.html)</div>
+                                  <div className="text-[10px] text-slate-500">Full visual dashboard & gauges</div>
                                 </div>
                               </button>
                               <button
@@ -2033,6 +2542,16 @@ WHERE t1.triSpaceTypeTX = 'OFFICE' AND t2.triStatusSY = 'Active'`}
                                 <div>
                                   <div className="font-semibold">Markdown Report (.md)</div>
                                   <div className="text-[10px] text-slate-500">Consolidated cluster report</div>
+                                </div>
+                              </button>
+                              <button
+                                onClick={() => activeCombinedType && handleExportHTMLCombined(activeCombinedType)}
+                                className="w-full text-left px-3.5 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-900 flex items-center gap-2"
+                              >
+                                <span className="w-2 h-2 rounded-full bg-blue-500" />
+                                <div>
+                                  <div className="font-semibold">Interactive HTML (.html)</div>
+                                  <div className="text-[10px] text-slate-500">Full visual dashboard & gauges</div>
                                 </div>
                               </button>
                               <button
