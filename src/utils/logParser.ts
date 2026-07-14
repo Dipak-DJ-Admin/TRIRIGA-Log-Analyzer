@@ -1,5 +1,138 @@
 import { CopilotAnalysis, Anomaly, Recommendation } from "../types";
 
+export interface ParsedEvent {
+  id: string;
+  timestamp: string;
+  level: "ERROR" | "WARN" | "INFO" | "DEBUG";
+  logger: string;
+  message: string;
+  details?: string;
+}
+
+export function extractLogDetails(logText: string) {
+  // Regex to match timestamps like 2026-07-12 10:15:33 or similar
+  const timestampRegex = /(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})/g;
+  const matches = [...logText.matchAll(timestampRegex)];
+  
+  let dateRange = "Unknown";
+  let duration = "Unknown Duration";
+  const lineCount = logText.split("\n").length;
+  
+  if (matches.length > 0) {
+    const firstMatch = matches[0];
+    const lastMatch = matches[matches.length - 1];
+    
+    const startTimeStr = `${firstMatch[1]} ${firstMatch[2]}`;
+    const endTimeStr = `${lastMatch[1]} ${lastMatch[2]}`;
+    
+    if (startTimeStr === endTimeStr) {
+      dateRange = startTimeStr;
+      duration = "Single point in time";
+    } else {
+      dateRange = `${startTimeStr} to ${endTimeStr}`;
+      
+      // Calculate duration if possible
+      try {
+        const start = new Date(startTimeStr.replace(/-/g, '/'));
+        const end = new Date(endTimeStr.replace(/-/g, '/'));
+        const diffMs = end.getTime() - start.getTime();
+        if (!isNaN(diffMs) && diffMs >= 0) {
+          const diffSec = Math.floor(diffMs / 1000);
+          if (diffSec < 60) {
+            duration = `${diffSec} seconds`;
+          } else if (diffSec < 3600) {
+            duration = `${Math.floor(diffSec / 60)} min, ${diffSec % 60} sec`;
+          } else {
+            duration = `${Math.floor(diffSec / 3600)} hr, ${Math.floor((diffSec % 3600) / 60)} min`;
+          }
+        }
+      } catch (e) {
+        duration = "Calculated across entries";
+      }
+    }
+  }
+  
+  return { dateRange, duration, lineCount };
+}
+
+export function parseLogEvents(logText: string): ParsedEvent[] {
+  const lines = logText.split("\n");
+  const events: ParsedEvent[] = [];
+  let currentEvent: ParsedEvent | null = null;
+  
+  // Regex for standard log header
+  const logHeaderRegex = /^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:,\d{3})?)\s+(INFO|WARN|ERROR|DEBUG|SEVERE)\s+\[([^\]]+)\]\s+(.*)$/;
+  
+  lines.forEach((line, index) => {
+    const headerMatch = line.match(logHeaderRegex);
+    if (headerMatch) {
+      if (currentEvent) {
+        events.push(currentEvent);
+      }
+      currentEvent = {
+        id: `ev-${index}`,
+        timestamp: headerMatch[1],
+        level: (headerMatch[2] === "SEVERE" ? "ERROR" : headerMatch[2]) as any,
+        logger: headerMatch[3],
+        message: headerMatch[4],
+        details: ""
+      };
+    } else {
+      if (currentEvent) {
+        // Append stack trace or continuation lines
+        currentEvent.details += (currentEvent.details ? "\n" : "") + line;
+      }
+    }
+  });
+  
+  if (currentEvent) {
+    events.push(currentEvent);
+  }
+  
+  // Fallback if no structured entries found (e.g. raw logs without standard TRIRIGA header format)
+  if (events.length === 0) {
+    lines.forEach((line, index) => {
+      const lower = line.toLowerCase();
+      let level: "ERROR" | "WARN" | "INFO" | "DEBUG" | null = null;
+      if (lower.includes("error") || lower.includes("exception") || lower.includes("severe") || lower.includes("outofmemoryerror")) {
+        level = "ERROR";
+      } else if (lower.includes("warn") || lower.includes("alert") || lower.includes("leaked")) {
+        level = "WARN";
+      } else if (lower.includes("info")) {
+        level = "INFO";
+      } else if (lower.includes("debug")) {
+        level = "DEBUG";
+      }
+      
+      if (level && line.trim().length > 0) {
+        // Simple timestamp detection
+        const tsMatch = line.match(/\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}/);
+        events.push({
+          id: `ev-${index}`,
+          timestamp: tsMatch ? tsMatch[0] : "N/A",
+          level,
+          logger: "PlatformLogger",
+          message: line.replace(/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:,\d{3})?\s*(?:INFO|WARN|ERROR|DEBUG|SEVERE)?\s*/i, "").trim(),
+          details: ""
+        });
+      }
+    });
+  }
+  
+  return events;
+}
+
+export function classifyLogType(name: string, content: string): 'server' | 'performance' | 'metrics' {
+  const text = (name + " " + content).toLowerCase();
+  if (text.includes("gc (") || text.includes("gc (allocation") || text.includes("g1gc") || text.includes("garbage collection") || text.includes("heap memory") || text.includes("allocation failure") || text.includes("outofmemoryerror") || text.includes("gc.log") || text.includes("jvm") || text.includes("management.gc")) {
+    return 'performance';
+  }
+  if (text.includes("threadmonitor") || text.includes("thread monitor") || text.includes("cpu utilization") || text.includes("cpu usage") || text.includes("webcontainer") || text.includes("thread.log") || text.includes("thread pool") || text.includes("cpu sustained")) {
+    return 'metrics';
+  }
+  return 'server';
+}
+
 export function parseLogsLocally(logText: string, scenarioName?: string): CopilotAnalysis {
   const text = logText.toLowerCase();
   const isScenario = scenarioName && scenarioName !== "Manual log upload";

@@ -1,11 +1,9 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Activity,
   Sliders,
   Terminal,
   BookOpen,
-  Sun,
-  Moon,
   Copy,
   Check,
   Loader2,
@@ -19,54 +17,88 @@ import {
   ArrowRight,
   Info,
   Upload,
-  Trash2
+  Trash2,
+  FileText,
+  Clock,
+  Eye,
+  Plus,
+  RefreshCw,
+  Flame,
+  ChevronRight,
+  X,
+  ShieldCheck,
+  HelpCircle
 } from "lucide-react";
-import { CopilotAnalysis, ActiveTab, AlertFilter, Recommendation, Anomaly } from "./types";
-import { sampleScenarios, LogScenario } from "./sampleLogs";
+import { CopilotAnalysis, AlertFilter } from "./types";
+import { sampleScenarios } from "./sampleLogs";
 import TelemetryChart from "./components/TelemetryChart";
 import MetricCard from "./components/MetricCard";
-import { parseLogsLocally } from "./utils/logParser";
+import {
+  parseLogsLocally,
+  parseLogEvents,
+  extractLogDetails,
+  classifyLogType,
+  ParsedEvent
+} from "./utils/logParser";
+
+interface AnalyzedFile {
+  id: string;
+  name: string;
+  size: number;
+  type: "server" | "performance" | "metrics";
+  content: string;
+  lineCount: number;
+  dateRange: string;
+  duration: string;
+  results: CopilotAnalysis;
+  parsedEvents: ParsedEvent[];
+}
 
 export default function App() {
-  const [darkMode, setDarkMode] = useState<boolean>(true);
-  const [activeTab, setActiveTab] = useState<ActiveTab>("Dashboard");
-  const [selectedScenario, setSelectedScenario] = useState<LogScenario>(sampleScenarios[1]); // Default to JVM Leak
-  const [copiedSnippet, setCopiedSnippet] = useState<string | null>(null);
-  
-  // Log Analyzer manual states
-  const [manualLogText, setManualLogText] = useState<string>(sampleScenarios[1].logText);
-  const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
-  const [analysisResult, setAnalysisResult] = useState<CopilotAnalysis | null>(null);
-  const [alertFilter, setAlertFilter] = useState<AlertFilter>("ALL");
-  const [searchQuery, setSearchQuery] = useState<string>("");
-  const [uploadedFiles, setUploadedFiles] = useState<{ name: string; size: number; }[]>([]);
+  // App States: 'upload' | 'processing' | 'dashboard'
+  const [appState, setAppState] = useState<"upload" | "processing" | "dashboard">("upload");
+  const [analyzedFiles, setAnalyzedFiles] = useState<AnalyzedFile[]>([]);
+  const [activeFileId, setActiveFileId] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState<boolean>(false);
+  const [pastedText, setPastedText] = useState<string>("");
+  const [copiedSnippet, setCopiedSnippet] = useState<string | null>(null);
+
+  // Search & Filter state for the dashboard
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [alertFilter, setAlertFilter] = useState<AlertFilter>("ALL");
+  const [activeTab, setActiveTab] = useState<"overview" | "details" | "tuning">("overview");
+
+  // Selection states for log event details in server log table
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+
+  // File processing state to animate loader progress
+  const [filesToProcess, setFilesToProcess] = useState<{ name: string; size: number; content: string }[]>([]);
+  const [processingIndex, setProcessingIndex] = useState<number>(0);
+  const [processingProgress, setProcessingProgress] = useState<number>(0);
+  const [processingStep, setProcessingStep] = useState<string>("");
 
   // Handle local files selected or dropped
   const handleFilesSelected = (files: FileList | null) => {
     if (!files || files.length === 0) return;
     
     const fileList = Array.from(files);
-    const newUploadedFilesList: { name: string; size: number; }[] = [];
-    const contents: string[] = [];
-    
+    const filesToLoad: { name: string; size: number; content: string }[] = [];
     let filesRead = 0;
+
     fileList.forEach((file) => {
       const reader = new FileReader();
       reader.onload = (e) => {
         const text = e.target?.result as string;
-        contents.push(`=== FILE: ${file.name} ===\n${text}`);
-        newUploadedFilesList.push({ name: file.name, size: file.size });
+        filesToLoad.push({
+          name: file.name,
+          size: file.size,
+          content: text
+        });
         
         filesRead++;
         if (filesRead === fileList.length) {
-          const combinedContent = contents.join("\n\n");
-          // If the textarea has default scenario text, let's overwrite it for a fresh upload
-          setManualLogText((prev) => {
-            const isDefault = sampleScenarios.some(sc => sc.logText === prev);
-            return isDefault ? combinedContent : `${prev}\n\n${combinedContent}`;
-          });
-          setUploadedFiles((prev) => [...prev, ...newUploadedFilesList]);
+          setFilesToProcess((prev) => [...prev, ...filesToLoad]);
+          setAppState("processing");
         }
       };
       reader.readAsText(file);
@@ -88,42 +120,141 @@ export default function App() {
     handleFilesSelected(e.dataTransfer.files);
   };
 
-  // Loading process visual messages
-  const [loadingMessage, setLoadingMessage] = useState<string>("");
+  // Run file parser processing sequentially to simulate a real analytics engine
+  useEffect(() => {
+    if (appState !== "processing" || filesToProcess.length === 0) return;
 
-  // Trigger analysis on scenario change or manual upload
-  const handleAnalyzeLogs = async (logToAnalyze: string, scenarioName: string) => {
-    setIsAnalyzing(true);
-    setLoadingMessage("Initializing IBM TRIRIGA Copilot Engine...");
-    
-    // Simulate reassuring incremental messages
-    const timers = [
-      setTimeout(() => setLoadingMessage("Acquiring connection metrics & system state..."), 500),
-      setTimeout(() => setLoadingMessage("Evaluating Cache Miss margins & Heap memory leaks..."), 1100),
+    if (processingIndex >= filesToProcess.length) {
+      // Completed all processing!
+      setAppState("dashboard");
+      setFilesToProcess([]);
+      setProcessingIndex(0);
+      setProcessingProgress(0);
+      return;
+    }
+
+    const currentFile = filesToProcess[processingIndex];
+    let progress = 0;
+
+    const steps = [
+      "Allocating dynamic memory stream buffers...",
+      "Extracting UTC timestamps and boundary date metrics...",
+      "Running G1GC telemetry parse patterns & heap limits...",
+      "Filtering thread lock signatures & WebContainers...",
+      "Evaluating DB connection pool starvation...",
+      "Generating Root Cause Analysis (RCA) report...",
+      "Saving parsed telemetry vectors..."
     ];
 
-    try {
-      // Simulate a brief local parsing delay for realistic analyzer feedback
-      await new Promise((resolve) => setTimeout(resolve, 1600));
-      const data = parseLogsLocally(logToAnalyze, scenarioName);
-      setAnalysisResult(data);
-    } catch (err) {
-      console.error("Analysis failed:", err);
-    } finally {
-      timers.forEach(clearTimeout);
-      setIsAnalyzing(false);
+    setProcessingStep(steps[0]);
+
+    const interval = setInterval(() => {
+      progress += 10;
+      setProcessingProgress(Math.min(100, progress));
+
+      const stepIndex = Math.floor((progress / 100) * steps.length);
+      if (stepIndex < steps.length) {
+        setProcessingStep(steps[stepIndex]);
+      }
+
+      if (progress >= 100) {
+        clearInterval(interval);
+        
+        // Analyze and append to finished files
+        const fileType = classifyLogType(currentFile.name, currentFile.content);
+        
+        // Map types to sample logs if name fits, or analyze generally
+        let parsedResults = parseLogsLocally(currentFile.content, currentFile.name);
+        
+        const details = extractLogDetails(currentFile.content);
+        const parsedEvents = parseLogEvents(currentFile.content);
+
+        const newAnalyzed: AnalyzedFile = {
+          id: `file-${Date.now()}-${processingIndex}`,
+          name: currentFile.name,
+          size: currentFile.size,
+          type: fileType,
+          content: currentFile.content,
+          lineCount: details.lineCount,
+          dateRange: details.dateRange,
+          duration: details.duration,
+          results: parsedResults,
+          parsedEvents: parsedEvents
+        };
+
+        setAnalyzedFiles((prev) => {
+          const updated = [...prev, newAnalyzed];
+          if (!activeFileId) {
+            setActiveFileId(newAnalyzed.id);
+          }
+          return updated;
+        });
+
+        // Delay slightly before next file
+        setTimeout(() => {
+          setProcessingIndex((prev) => prev + 1);
+          setProcessingProgress(0);
+        }, 500);
+      }
+    }, 150);
+
+    return () => clearInterval(interval);
+  }, [appState, filesToProcess, processingIndex]);
+
+  // Load Preset files for immediate testing
+  const handleLoadPresets = (mode: "all" | "server" | "gc" | "metrics") => {
+    const filesToLoad: { name: string; size: number; content: string }[] = [];
+
+    const serverPreset = sampleScenarios[3]; // workflow-deadlock
+    const gcPreset = sampleScenarios[1];     // jvm-memory-leak
+    const metricsPreset = sampleScenarios[0]; // cpu-exhaustion
+    const optimalPreset = sampleScenarios[4]; // optimal-health
+
+    if (mode === "all" || mode === "server") {
+      filesToLoad.push({
+        name: "tririga_server_error_stream.log",
+        size: serverPreset.logText.length * 1.5,
+        content: serverPreset.logText
+      });
     }
+    if (mode === "all" || mode === "gc") {
+      filesToLoad.push({
+        name: "ibm_websphere_g1gc_metrics.log",
+        size: gcPreset.logText.length * 1.5,
+        content: gcPreset.logText
+      });
+    }
+    if (mode === "all" || mode === "metrics") {
+      filesToLoad.push({
+        name: "tririga_thread_monitor_dump.log",
+        size: metricsPreset.logText.length * 1.5,
+        content: metricsPreset.logText
+      });
+    }
+    if (mode === "all" && filesToLoad.length === 3) {
+      filesToLoad.push({
+        name: "tririga_healthy_baseline.log",
+        size: optimalPreset.logText.length * 1.5,
+        content: optimalPreset.logText
+      });
+    }
+
+    setFilesToProcess(filesToLoad);
+    setAppState("processing");
   };
 
-  // Run initial analysis on mount
-  useEffect(() => {
-    handleAnalyzeLogs(selectedScenario.logText, selectedScenario.name);
-  }, [selectedScenario]);
-
-  // Handle scenario switch
-  const handleScenarioSelect = (scenario: LogScenario) => {
-    setSelectedScenario(scenario);
-    setManualLogText(scenario.logText);
+  // Paste direct log text triggers analysis as a generic server log
+  const handleAnalyzePastedText = () => {
+    if (!pastedText.trim()) return;
+    setFilesToProcess([
+      {
+        name: "pasted_log_stream.log",
+        size: pastedText.length * 1.5,
+        content: pastedText
+      }
+    ]);
+    setAppState("processing");
+    setPastedText("");
   };
 
   const handleCopyText = (text: string) => {
@@ -132,841 +263,1266 @@ export default function App() {
     setTimeout(() => setCopiedSnippet(null), 2000);
   };
 
-  // Calculate overall platform health score
-  const getHealthScore = (): number => {
-    if (!analysisResult) return 100;
-    const { status, metrics } = analysisResult;
+  const handleRemoveFile = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setAnalyzedFiles((prev) => {
+      const filtered = prev.filter((f) => f.id !== id);
+      if (activeFileId === id) {
+        setActiveFileId(filtered.length > 0 ? filtered[0].id : null);
+      }
+      if (filtered.length === 0) {
+        setAppState("upload");
+      }
+      return filtered;
+    });
+  };
+
+  const activeFile = analyzedFiles.find((f) => f.id === activeFileId);
+
+  // Calculate health score of selected active log file
+  const getHealthScore = (file: AnalyzedFile | undefined): number => {
+    if (!file) return 100;
+    const { status, metrics } = file.results;
     if (status === "Healthy") return 98;
     
     let score = 90;
-    if (metrics.cpuMax > 80) score -= 30;
+    if (metrics.cpuMax && metrics.cpuMax > 80) score -= 30;
     if (metrics.memoryLeakRisk === "High") score -= 35;
-    if (metrics.cacheMissRatio > 15) score -= 15;
-    if (metrics.workflowFailureRate > 2) score -= 15;
+    if (metrics.cacheMissRatio && metrics.cacheMissRatio > 15) score -= 15;
+    if (metrics.workflowFailureRate && metrics.workflowFailureRate > 2) score -= 15;
     return Math.max(8, score);
   };
 
-  // Filter alerts based on filter tab and search
-  const filteredAnomalies = (): Anomaly[] => {
-    if (!analysisResult) return [];
-    return analysisResult.detectedAnomalies.filter(anomaly => {
+  const activeHealthScore = getHealthScore(activeFile);
+
+  // Filter alerts based on active file results
+  const getFilteredAnomalies = () => {
+    if (!activeFile) return [];
+    return activeFile.results.detectedAnomalies.filter((anomaly) => {
       const matchesFilter = alertFilter === "ALL" || anomaly.severity === alertFilter;
-      const matchesSearch = anomaly.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                            anomaly.description.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesSearch =
+        anomaly.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        anomaly.description.toLowerCase().includes(searchQuery.toLowerCase());
       return matchesFilter && matchesSearch;
     });
   };
 
-  const healthScore = getHealthScore();
+  // Switch to details view when a file is selected to show details immediately
+  useEffect(() => {
+    if (activeFile) {
+      // By default when changing active files, default to Overview tab
+      setActiveTab("overview");
+      setSelectedEventId(null);
+    }
+  }, [activeFileId]);
 
   return (
     <div id="root-theme-container" className="dark">
-      <div className="min-h-screen bg-[#0A0B0E] text-slate-300 font-sans transition-colors duration-300">
+      <div className="min-h-screen bg-[#08090C] text-slate-300 font-sans antialiased selection:bg-blue-600/30">
         
-        {/* Header Section */}
-        <header id="app-header" className="bg-[#161B22] border-b border-[#30363D] sticky top-0 z-50 transition-colors">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-18 flex items-center justify-between">
+        {/* TOP LEVEL NAVIGATION HEADER */}
+        <header id="app-header" className="bg-[#0F1115] border-b border-[#21262D] sticky top-0 z-50">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div id="brand-logo" className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-xl shadow-md">
+              <div id="brand-logo" className="w-8.5 h-8.5 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-lg flex items-center justify-center text-white font-black text-lg shadow-lg">
                 T
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h1 id="brand-title" className="text-base font-bold text-white tracking-tight">
-                    IBM TRIRIGA Copilot
+                  <h1 id="brand-title" className="text-sm font-bold text-white tracking-tight">
+                    TRIRIGA Performance Copilot
                   </h1>
-                  <span className="text-[10px] font-bold bg-[#30363D] text-blue-400 px-2 py-0.5 rounded border border-[#30363D] font-mono">
+                  <span className="text-[9px] font-bold bg-[#1B2028] text-blue-400 px-1.5 py-0.5 rounded border border-[#2D333B] font-mono">
                     ENTERPRISE v4.8
                   </span>
                 </div>
-                <p id="brand-subtitle" className="text-[11px] text-slate-500 uppercase tracking-wider font-semibold">
-                  Performance Diagnostics & Platform Observability
+                <p id="brand-subtitle" className="text-[10px] text-slate-500 uppercase tracking-wider font-bold">
+                  Isolated Multi-Log Diagnostic System
                 </p>
               </div>
             </div>
 
-            {/* Navigation Tabs */}
-            <nav id="nav-tabs" className="hidden lg:flex items-center bg-[#0A0B0E] p-1 rounded-xl border border-[#30363D]">
-              <button
-                id="tab-dashboard"
-                onClick={() => setActiveTab("Dashboard")}
-                className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                  activeTab === "Dashboard"
-                    ? "bg-[#30363D] text-white shadow-sm border border-[#30363D]"
-                    : "text-slate-400 hover:text-white"
-                }`}
-              >
-                <Sliders className="w-3.5 h-3.5" />
-                Live Dashboard
-              </button>
-              <button
-                id="tab-analyzer"
-                onClick={() => setActiveTab("LogAnalyzer")}
-                className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                  activeTab === "LogAnalyzer"
-                    ? "bg-[#30363D] text-white shadow-sm border border-[#30363D]"
-                    : "text-slate-400 hover:text-white"
-                }`}
-              >
-                <Terminal className="w-3.5 h-3.5" />
-                Custom Log Analyzer
-              </button>
-              <button
-                id="tab-bestpractices"
-                onClick={() => setActiveTab("TRIRIGABestPractices")}
-                className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                  activeTab === "TRIRIGABestPractices"
-                    ? "bg-[#30363D] text-white shadow-sm border border-[#30363D]"
-                    : "text-slate-400 hover:text-white"
-                }`}
-              >
-                <BookOpen className="w-3.5 h-3.5" />
-                Tuning Reference
-              </button>
-            </nav>
-
-            {/* Right Header Actions matching Elegant Dark */}
-            <div className="flex items-center gap-6">
-              <div className="hidden sm:flex flex-col items-end text-right">
-                <span className="text-[10px] text-slate-500 uppercase tracking-wider font-bold">Primary Instance</span>
-                <span className="text-xs text-blue-400 font-bold">tririga-prod-us-east-01</span>
+            {appState === "dashboard" && (
+              <div className="hidden md:flex items-center gap-2">
+                <button
+                  onClick={() => setAppState("upload")}
+                  className="px-3 py-1.5 bg-[#1B2028] hover:bg-[#21262D] text-slate-300 hover:text-white border border-[#2D333B] rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Upload More Files
+                </button>
+                <button
+                  onClick={() => {
+                    setAnalyzedFiles([]);
+                    setAppState("upload");
+                  }}
+                  className="px-3 py-1.5 bg-rose-950/20 hover:bg-rose-950/40 text-rose-400 hover:text-rose-300 border border-rose-900/40 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Clear Session
+                </button>
               </div>
-              <div className="hidden sm:block h-10 w-[1px] bg-[#30363D]"></div>
-              {analysisResult && (
-                <div className={`px-3 py-1.5 rounded-full flex items-center gap-2 border text-[11px] font-bold ${
-                  analysisResult.status === "Critical"
-                    ? "bg-red-950/30 border-red-500/50 text-red-400"
-                    : analysisResult.status === "Degraded"
-                    ? "bg-amber-950/30 border-amber-500/50 text-amber-400"
-                    : "bg-emerald-950/30 border-emerald-500/50 text-emerald-400"
-                }`}>
-                  <div className={`w-2 h-2 rounded-full animate-pulse ${
-                    analysisResult.status === "Critical"
-                      ? "bg-red-500"
-                      : analysisResult.status === "Degraded"
-                      ? "bg-amber-500"
-                      : "bg-emerald-500"
-                  }`}></div>
-                  <span>{
-                    analysisResult.status === "Critical"
-                      ? "CRITICAL ANOMALY DETECTED"
-                      : analysisResult.status === "Degraded"
-                      ? "SYSTEM DEGRADED"
-                      : "PLATFORM HEALTHY"
-                  }</span>
-                </div>
-              )}
-            </div>
+            )}
           </div>
         </header>
 
-        {/* Mobile Navigation Sticky Panel */}
-        <div className="md:hidden bg-[#161B22] border-b border-[#30363D] py-3.5 px-4 flex justify-around sticky top-18 z-40 shadow-sm">
-          <button
-            id="mobile-tab-dash"
-            onClick={() => setActiveTab("Dashboard")}
-            className={`flex flex-col items-center gap-1 text-[10px] font-bold ${
-              activeTab === "Dashboard" ? "text-blue-400" : "text-slate-500"
-            }`}
-          >
-            <Sliders className="w-4 h-4" />
-            Dashboard
-          </button>
-          <button
-            id="mobile-tab-analyzer"
-            onClick={() => setActiveTab("LogAnalyzer")}
-            className={`flex flex-col items-center gap-1 text-[10px] font-bold ${
-              activeTab === "LogAnalyzer" ? "text-blue-400" : "text-slate-500"
-            }`}
-          >
-            <Terminal className="w-4 h-4" />
-            Analyzer
-          </button>
-          <button
-            id="mobile-tab-practices"
-            onClick={() => setActiveTab("TRIRIGABestPractices")}
-            className={`flex flex-col items-center gap-1 text-[10px] font-bold ${
-              activeTab === "TRIRIGABestPractices" ? "text-blue-400" : "text-slate-500"
-            }`}
-          >
-            <BookOpen className="w-4 h-4" />
-            Best Practices
-          </button>
-        </div>
-
-        {/* Scenario Selection Rail */}
-        <div className="bg-[#161B22]/40 border-b border-[#30363D]">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5">
-            <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3">
-              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-                <Sliders className="w-3.5 h-3.5 text-blue-400" />
-                Select Diagnostic Scenario Preset:
-              </span>
-              <div className="flex flex-wrap gap-2 w-full lg:w-auto">
-                {sampleScenarios.map((scenario) => {
-                  const isActive = selectedScenario.id === scenario.id;
-
-                  return (
-                    <button
-                      key={scenario.id}
-                      id={`scenario-${scenario.id}`}
-                      onClick={() => handleScenarioSelect(scenario)}
-                      className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer ${
-                        isActive
-                          ? "bg-blue-600 border-blue-600 text-white shadow-md"
-                          : `bg-[#161B22] border-[#30363D] hover:bg-[#30363D] text-slate-300`
-                      }`}
-                    >
-                      {scenario.name}
-                    </button>
-                  );
-                })}
+        {/* ======================= PHASE 1: UPLOAD PORTAL ======================= */}
+        {appState === "upload" && (
+          <main className="max-w-4xl mx-auto px-4 py-12 sm:py-20 animate-fade-in">
+            
+            <div className="text-center space-y-3 mb-10">
+              <div className="inline-flex p-3 bg-blue-950/40 rounded-2xl border border-blue-800/20 text-blue-400 mb-2">
+                <Terminal className="w-8 h-8" />
               </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Loading Overlay */}
-        {isAnalyzing && (
-          <div id="loading-overlay" className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex flex-col items-center justify-center p-4">
-            <div className="bg-[#161B22] border border-[#30363D] max-w-sm w-full rounded-2xl p-6 shadow-2xl flex flex-col items-center text-center">
-              <Loader2 className="w-10 h-10 text-blue-500 animate-spin mb-4" />
-              <h3 className="text-white font-bold mb-2">Analyzing Platform Logs</h3>
-              <p className="text-xs text-slate-400 font-mono min-h-6 transition-all">
-                {loadingMessage}
+              <h2 className="text-2xl font-extrabold text-white tracking-tight">
+                IBM TRIRIGA Platform Diagnostic Portal
+              </h2>
+              <p className="text-xs text-slate-400 max-w-xl mx-auto leading-relaxed">
+                A highly-focused observability tool to aggregate, isolate, and debug IBM TRIRIGA environment log files. Upload multiple files at once and isolate anomalies specific to each stream.
               </p>
             </div>
-          </div>
-        )}
 
-        {/* Main Workspace Frame */}
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          
-          {/* TAB 1: DASHBOARD VIEW */}
-          {activeTab === "Dashboard" && analysisResult && (
-            <div id="tab-dashboard-view" className="space-y-8 animate-fade-in">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               
-              {/* Executive Summary Section */}
-              <section id="executive-summary" className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Drop & Paste Portal Block */}
+              <div className="md:col-span-2 space-y-4">
                 
-                {/* Health Score Gauge */}
-                <div className="bg-[#161B22] border border-[#30363D] p-6 rounded-2xl shadow-sm flex flex-col items-center justify-center relative overflow-hidden">
-                  <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-[#0A0B0E] px-2.5 py-1 rounded border border-[#30363D] text-[10px] font-mono text-slate-500">
-                    <Activity className="w-3 h-3 text-blue-500" />
-                    Overall Health Score
-                  </div>
-
-                  {/* SVG Health Ring Gauge */}
-                  <div className="relative w-40 h-40 mt-4 flex items-center justify-center">
-                    <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
-                      <circle
-                        cx="50"
-                        cy="50"
-                        r="40"
-                        fill="transparent"
-                        className="stroke-[#30363D]"
-                        strokeWidth="8"
-                      />
-                      <circle
-                        cx="50"
-                        cy="50"
-                        r="40"
-                        fill="transparent"
-                        className={`transition-all duration-1000 ease-out ${
-                          healthScore > 80 
-                            ? "stroke-emerald-500" 
-                            : healthScore > 40 
-                            ? "stroke-amber-500" 
-                            : "stroke-rose-500"
-                        }`}
-                        strokeWidth="8"
-                        strokeDasharray="251.2"
-                        strokeDashoffset={251.2 - (251.2 * healthScore) / 100}
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                    <div className="absolute flex flex-col items-center justify-center">
-                      <span className="text-4xl font-extrabold font-mono text-white tracking-tight">
-                        {healthScore}
-                      </span>
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-0.5">
-                        Rating
-                      </span>
+                {/* Drag and Drop Zone */}
+                <div
+                  id="drop-zone"
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  onClick={() => document.getElementById("portal-file-input")?.click()}
+                  className={`border-2 border-dashed rounded-2xl p-10 text-center cursor-pointer transition-all duration-300 ${
+                    isDragging
+                      ? "border-blue-500 bg-blue-950/15"
+                      : "border-[#30363D] bg-[#0F1115] hover:border-blue-500/40"
+                  }`}
+                >
+                  <input
+                    type="file"
+                    id="portal-file-input"
+                    multiple
+                    onChange={(e) => handleFilesSelected(e.target.files)}
+                    className="hidden"
+                  />
+                  <div className="space-y-3 pointer-events-none">
+                    <div className="w-12 h-12 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center mx-auto text-blue-500 shadow-inner">
+                      <Upload className="w-5.5 h-5.5" />
                     </div>
-                  </div>
-
-                  {/* Rating Description */}
-                  <div className="mt-4 text-center w-full">
-                    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded text-xs font-bold ${
-                      analysisResult.status === "Healthy"
-                        ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
-                        : analysisResult.status === "Degraded"
-                        ? "bg-amber-500/10 text-amber-400 border border-amber-500/30"
-                        : "bg-rose-500/10 text-rose-400 border border-rose-500/30"
-                    }`}>
-                      {analysisResult.status === "Healthy" && <CheckCircle2 className="w-3.5 h-3.5" />}
-                      {analysisResult.status === "Degraded" && <AlertTriangle className="w-3.5 h-3.5" />}
-                      {analysisResult.status === "Critical" && <XCircle className="w-3.5 h-3.5" />}
-                      PLATFORM STATUS: {analysisResult.status.toUpperCase()}
-                    </span>
-                  </div>
-                </div>
-
-                {/* AI Executive Summary Block */}
-                <div className="lg:col-span-2 bg-[#161B22] border border-[#30363D] p-6 rounded-2xl shadow-sm flex flex-col justify-between relative">
-                  
-                  {/* AI badge indicator */}
-                  <div className="absolute top-4 right-4 flex items-center gap-1 px-2.5 py-1 bg-[#0A0B0E] border border-blue-500/30 text-[10px] font-bold text-blue-400 rounded font-mono">
-                    <Sparkles className="w-3 h-3 animate-spin" />
-                    {analysisResult.isAI ? "GEMINI AI ANALYSIS" : "COPILOT DETERMINISTIC ENGINE"}
-                  </div>
-
-                  <div>
-                    <h2 className="text-sm font-semibold text-slate-200 uppercase tracking-tight mb-3 flex items-center gap-2">
-                      <Info className="w-4 h-4 text-blue-500" />
-                      Executive Summary & Health Analysis
-                    </h2>
-                    <p className="text-sm text-slate-300 leading-relaxed font-sans">
-                      {analysisResult.executiveSummary}
-                    </p>
-                  </div>
-
-                  <div className="mt-4 pt-4 border-t border-[#30363D] flex flex-wrap justify-between items-center text-xs text-slate-500 gap-2">
                     <div>
-                      <span>Server Context: </span>
-                      <span className="font-bold font-mono text-slate-400">ServerNode01 (Production)</span>
-                    </div>
-                    <div className="font-mono text-[10px]">
-                      Average Execution Latency: <span className="font-bold text-blue-400">{analysisResult.metrics.avgResponseTimeMs !== null ? `${analysisResult.metrics.avgResponseTimeMs}ms` : "N/A"}</span>
-                    </div>
-                  </div>
-                </div>
-              </section>
-
-              {/* Technical breakdown Metrics Row */}
-              <section id="metrics-cards-grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                <MetricCard
-                  title="Sustained Max CPU"
-                  value={analysisResult.metrics.cpuMax !== null ? `${analysisResult.metrics.cpuMax.toFixed(1)}%` : "N/A"}
-                  subtext="WebContainer Threads"
-                  metricType="cpu"
-                  metrics={analysisResult.metrics}
-                />
-                <MetricCard
-                  title="JVM Heap Trend"
-                  value={analysisResult.metrics.memoryTrend}
-                  subtext={analysisResult.metrics.memoryLeakRisk !== "Unknown" ? `Risk: ${analysisResult.metrics.memoryLeakRisk}` : "Risk: N/A"}
-                  metricType="memory"
-                  metrics={analysisResult.metrics}
-                />
-                <MetricCard
-                  title="Cache Miss Ratio"
-                  value={analysisResult.metrics.cacheMissRatio !== null ? `${analysisResult.metrics.cacheMissRatio.toFixed(1)}%` : "N/A"}
-                  subtext="Object/GUI Cache"
-                  metricType="cache"
-                  metrics={analysisResult.metrics}
-                />
-                <MetricCard
-                  title="WF Failure Rate"
-                  value={analysisResult.metrics.workflowFailureRate !== null ? `${analysisResult.metrics.workflowFailureRate.toFixed(1)}%` : "N/A"}
-                  subtext={analysisResult.metrics.workflowFailureRate !== null ? `${analysisResult.metrics.totalWorkflowsFailed}/${analysisResult.metrics.totalWorkflowsProcessed} failed` : "No workflow logs"}
-                  metricType="workflow"
-                  metrics={analysisResult.metrics}
-                />
-              </section>
-
-              {/* Dynamic Telemetry Graphs Section */}
-              <section id="telemetry-graphs">
-                <TelemetryChart 
-                  metrics={analysisResult.metrics} 
-                  scenarioId={selectedScenario.id}
-                />
-              </section>
-
-              {/* Bottom Diagnostics Grid: RCA, Alerts Feed, and Recommendations */}
-              <section id="diagnostics-workspace" className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                
-                {/* Left: Alerts, Anomalies, and Rules Feed */}
-                <div className="bg-[#161B22] border border-[#30363D] p-6 rounded-2xl shadow-sm space-y-5">
-                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-                    <div>
-                      <h3 className="text-sm font-semibold text-white uppercase tracking-tight">
-                        Anomalies & Alerts
-                      </h3>
-                      <p className="text-xs text-slate-500">
-                        Real-time active alert monitors
+                      <p className="text-xs font-bold text-slate-200">
+                        Select TRIRIGA log files to parse
+                      </p>
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        Drag and drop multiple <span className="text-blue-400 font-semibold font-mono">server.log</span>, <span className="text-blue-400 font-semibold font-mono">gc.log</span> or metrics dumps here
                       </p>
                     </div>
-                    {/* Alert Filter Selectors */}
-                    <select
-                      id="alert-filter-dropdown"
-                      value={alertFilter}
-                      onChange={(e) => setAlertFilter(e.target.value as AlertFilter)}
-                      className="bg-[#0A0B0E] border border-[#30363D] text-slate-300 text-xs rounded px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
-                    >
-                      <option value="ALL">All Alerts</option>
-                      <option value="Critical">Critical</option>
-                      <option value="Warning">Warning</option>
-                      <option value="Info">Info</option>
-                    </select>
-                  </div>
-
-                  {/* Search Bar */}
-                  <div className="relative">
-                    <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
-                    <input
-                      id="alert-search"
-                      type="text"
-                      placeholder="Search alerts..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="w-full bg-[#0A0B0E] border border-[#30363D] text-slate-300 text-xs rounded pl-9 pr-4 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    />
-                  </div>
-
-                  {/* Alerts Feed */}
-                  <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1">
-                    {filteredAnomalies().length === 0 ? (
-                      <div className="text-center py-8 border border-dashed border-[#30363D] rounded-xl">
-                        <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto mb-2" />
-                        <p className="text-xs text-slate-500 font-medium">No alerts matching filter criteria</p>
-                      </div>
-                    ) : (
-                      filteredAnomalies().map((anomaly, idx) => {
-                        const alertStyles = {
-                          Critical: "bg-red-950/20 border-red-900/50 text-red-400",
-                          Warning: "bg-amber-950/20 border-amber-900/50 text-amber-400",
-                          Info: "bg-blue-950/20 border-blue-900/50 text-blue-400"
-                        }[anomaly.severity];
-
-                        return (
-                          <div 
-                            key={`alert-${idx}`}
-                            id={`anomaly-item-${idx}`}
-                            className={`p-3.5 border rounded-xl space-y-1.5 transition-all hover:-translate-y-0.5 ${alertStyles}`}
-                          >
-                            <div className="flex justify-between items-start">
-                              <span className="font-bold text-xs tracking-tight">{anomaly.title}</span>
-                              <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border border-current">
-                                {anomaly.severity}
-                              </span>
-                            </div>
-                            <p className="text-xs opacity-90 leading-relaxed font-sans">{anomaly.description}</p>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-
-                  {/* Standard Threshold Alerts List Reference Card */}
-                  <div className="bg-[#0A0B0E] border border-[#30363D] p-4 rounded-xl space-y-2">
-                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
-                      Active Observability Threshold Config
-                    </span>
-                    <ul className="space-y-1.5 text-[11px] text-slate-500 font-mono">
-                      <li className="flex justify-between">
-                        <span>CPU Spike alert:</span>
-                        <span className="font-bold text-slate-400">&gt; 80%</span>
-                      </li>
-                      <li className="flex justify-between">
-                        <span>JVM Memory Leak alert:</span>
-                        <span className="font-bold text-slate-400">Heap Staircase</span>
-                      </li>
-                      <li className="flex justify-between">
-                        <span>Cache Miss Storm:</span>
-                        <span className="font-bold text-slate-400">&gt; 15%</span>
-                      </li>
-                      <li className="flex justify-between">
-                        <span>WF Fail operational alert:</span>
-                        <span className="font-bold text-slate-400">&gt; 2%</span>
-                      </li>
-                    </ul>
-                  </div>
-                </div>
-
-                {/* Right: RCA & Actionable Recommendations (Take 2 Columns) */}
-                <div className="lg:col-span-2 space-y-8">
-                  
-                  {/* Markdown RCA Card */}
-                  <div className="bg-[#161B22] border border-[#30363D] p-6 rounded-2xl shadow-sm">
-                    <h3 className="text-sm font-semibold text-white uppercase tracking-tight mb-4 flex items-center gap-2">
-                      <Code className="w-4.5 h-4.5 text-blue-500" />
-                      Root Cause Analysis (RCA) Detail
-                    </h3>
-                    <div className="prose prose-slate max-w-none text-xs leading-relaxed space-y-3 font-sans text-slate-300">
-                      {/* Simple custom markdown renderer to render bold points and blocks cleanly without extra library crashes */}
-                      {analysisResult.rca.split("\n\n").map((block, bIdx) => {
-                        if (block.startsWith("###")) {
-                          return (
-                            <h4 key={`rca-h-${bIdx}`} className="text-xs font-bold text-slate-200 mt-4 mb-2 uppercase tracking-wide">
-                              {block.replace("###", "").trim()}
-                            </h4>
-                          );
-                        }
-                        if (block.includes("1. ") || block.includes("2. ") || block.includes("3. ")) {
-                          return (
-                            <ul key={`rca-ul-${bIdx}`} className="space-y-1.5 pl-4 list-disc">
-                              {block.split("\n").map((li, lIdx) => (
-                                <li key={`rca-li-${lIdx}`} className="text-slate-300">
-                                  {li.replace(/^\d+\.\s+\*\*/, "").replace(/\*\*/g, "").trim()}
-                                </li>
-                              ))}
-                            </ul>
-                          );
-                        }
-                        return <p key={`rca-p-${bIdx}`} className="text-slate-300 leading-relaxed">{block}</p>;
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Recommendations with Code Copy Snippets */}
-                  <div className="bg-[#161B22] border border-[#30363D] p-6 rounded-2xl shadow-sm space-y-6">
-                    <div>
-                      <h3 className="text-sm font-semibold text-white uppercase tracking-tight">
-                        Actionable Tuning Recommendations
-                      </h3>
-                      <p className="text-xs text-slate-500">
-                        Remedies, SQL optimizations, and property changes generated by Copilot
-                      </p>
-                    </div>
-
-                    <div className="space-y-4">
-                      {analysisResult.recommendations.map((recommendation, idx) => (
-                        <div 
-                          key={`rec-${idx}`}
-                          id={`rec-card-${idx}`}
-                          className="bg-[#0A0B0E] border border-[#30363D] p-5 rounded-xl space-y-3"
-                        >
-                          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-                            <span className="font-bold text-xs text-white">
-                              {recommendation.title}
-                            </span>
-                            <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
-                              recommendation.category === "Property Edit"
-                                ? "bg-blue-950/40 text-blue-400 border border-blue-900/50"
-                                : recommendation.category === "DB Query"
-                                ? "bg-emerald-950/40 text-emerald-400 border border-emerald-900/50"
-                                : "bg-purple-950/40 text-purple-400 border border-purple-900/50"
-                            }`}>
-                              {recommendation.category}
-                            </span>
-                          </div>
-
-                          <p className="text-xs text-slate-300 leading-relaxed font-sans">
-                            {recommendation.description}
-                          </p>
-
-                          {recommendation.codeSnippet && (
-                            <div className="relative group">
-                              <pre className="text-[11px] bg-[#111827] text-slate-300 rounded-lg p-3.5 font-mono overflow-x-auto border border-[#30363D] max-h-48">
-                                {recommendation.codeSnippet}
-                              </pre>
-                              <button
-                                onClick={() => handleCopyText(recommendation.codeSnippet || "")}
-                                className="absolute right-2.5 top-2.5 p-1.5 bg-[#161B22] hover:bg-[#30363D] border border-[#30363D] text-slate-400 hover:text-white rounded transition-all cursor-pointer opacity-80 group-hover:opacity-100"
-                                title="Copy configuration snippet"
-                              >
-                                {copiedSnippet === recommendation.codeSnippet ? (
-                                  <Check className="w-3.5 h-3.5 text-emerald-400" />
-                                ) : (
-                                  <Copy className="w-3.5 h-3.5" />
-                                )}
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                </div>
-              </section>
-
-            </div>
-          )}
-
-          {/* TAB 2: CUSTOM LOG ANALYZER VIEW */}
-          {activeTab === "LogAnalyzer" && (
-            <div id="tab-analyzer-view" className="space-y-8 animate-fade-in">
-              <div className="bg-[#161B22] border border-[#30363D] p-6 rounded-2xl shadow-sm">
-                <div className="flex items-start gap-4 mb-6">
-                  <div className="p-3 bg-blue-950/40 text-blue-400 rounded-xl border border-blue-900/50">
-                    <Terminal className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <h2 className="text-base font-bold text-white">
-                      Enterprise IBM TRIRIGA Log Analyzer
-                    </h2>
-                    <p className="text-xs text-slate-500">
-                      Upload single or multiple files (server.log, security.log, gc.log, sql.log) or paste log entries directly to aggregate and run diagnostic evaluation.
+                    <p className="text-[9px] text-slate-500 font-mono">
+                      Log formats supported: .log, .txt, .xml (Max 15MB each)
                     </p>
                   </div>
                 </div>
 
-                <div className="space-y-5">
-                  {/* Drop zone with full interactive support */}
-                  <div 
-                    id="drop-zone"
-                    onDragOver={handleDragOver}
-                    onDragLeave={handleDragLeave}
-                    onDrop={handleDrop}
-                    onClick={() => document.getElementById("log-file-input")?.click()}
-                    className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all relative ${
-                      isDragging 
-                        ? "border-blue-500 bg-blue-950/20" 
-                        : "border-[#30363D] bg-[#0A0B0E]/40 hover:border-blue-500/50"
-                    }`}
-                  >
-                    <input 
-                      type="file" 
-                      id="log-file-input" 
-                      multiple 
-                      onChange={(e) => handleFilesSelected(e.target.files)} 
-                      className="hidden" 
-                    />
-                    <div className="space-y-2 pointer-events-none">
-                      <Upload className="w-10 h-10 text-blue-500 mx-auto" />
-                      <p className="text-xs font-medium text-slate-300">
-                        <span className="text-blue-400 font-bold">Click to upload</span> or drag and drop multiple log files here
-                      </p>
-                      <p className="text-[10px] text-slate-500 font-mono">
-                        Supports .log, .txt, .xml, .csv files (Max 15MB each)
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* List of aggregated uploaded files */}
-                  {uploadedFiles.length > 0 && (
-                    <div id="uploaded-files-list" className="bg-[#0A0B0E] border border-[#30363D] rounded-xl p-4 space-y-2">
-                      <div className="flex justify-between items-center pb-2 border-b border-[#30363D]">
-                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">
-                          Aggregated Log Files ({uploadedFiles.length})
-                        </span>
-                        <button 
-                          onClick={() => {
-                            setUploadedFiles([]);
-                            setManualLogText("");
-                          }}
-                          className="text-[11px] font-semibold text-rose-400 hover:text-rose-300 transition-all flex items-center gap-1 cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          Clear All Uploads
-                        </button>
-                      </div>
-                      <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
-                        {uploadedFiles.map((file, fIdx) => (
-                          <div key={`file-${fIdx}`} className="flex justify-between items-center text-[11px] font-mono bg-[#161B22] p-2.5 rounded border border-[#30363D]/50 text-slate-300">
-                            <span className="truncate max-w-[280px]" title={file.name}>{file.name}</span>
-                            <span className="text-slate-500 font-bold">{(file.size / 1024).toFixed(1)} KB</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
+                {/* Paste Log Text Direct Option */}
+                <div className="bg-[#0F1115] border border-[#21262D] rounded-2xl p-5 space-y-3">
                   <div className="flex justify-between items-center">
-                    <span className="text-xs font-semibold text-slate-400">Merged Log Streams & Input Area</span>
-                    <button
-                      onClick={() => {
-                        setManualLogText("");
-                        setUploadedFiles([]);
-                      }}
-                      className="text-xs text-slate-500 hover:text-slate-300 cursor-pointer"
-                    >
-                      Clear Content
-                    </button>
+                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Code className="w-3.5 h-3.5 text-blue-400" />
+                      Paste raw log stream text directly
+                    </span>
+                    {pastedText && (
+                      <button
+                        onClick={() => setPastedText("")}
+                        className="text-[10px] text-slate-500 hover:text-slate-300"
+                      >
+                        Clear
+                      </button>
+                    )}
                   </div>
                   
                   <textarea
-                    id="log-textarea"
-                    rows={12}
-                    value={manualLogText}
-                    onChange={(e) => setManualLogText(e.target.value)}
-                    placeholder="2026-07-12 10:15:33,124 INFO [com.tririga.platform.performance.ThreadMonitor] CPU Utilization sustained..."
-                    className="w-full bg-[#0A0B0E] text-slate-300 rounded-xl p-4 font-mono text-xs border border-[#30363D] focus:outline-none focus:ring-1 focus:ring-blue-500 leading-relaxed"
+                    rows={4}
+                    value={pastedText}
+                    onChange={(e) => setPastedText(e.target.value)}
+                    placeholder="Paste log entries here to trigger deterministic parsing... e.g. 2026-07-12 11:42:30 ERROR [com.tririga.platform] LockTimeoutException waiting on T_WORK_ORDER..."
+                    className="w-full bg-[#08090C] text-slate-300 rounded-xl p-3.5 font-mono text-[11px] border border-[#21262D] focus:outline-none focus:ring-1 focus:ring-blue-500 leading-relaxed resize-none"
                   />
 
-                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pt-2">
-                    <span className="text-[11px] text-slate-500 flex items-center gap-1">
-                      <Sparkles className="w-3.5 h-3.5 text-blue-400" />
-                      We leverage advanced parsing and thresholds to evaluate G1GC pauses, database locks, and thread exhaustion.
-                    </span>
+                  <div className="flex justify-end">
                     <button
-                      id="trigger-analysis-btn"
-                      onClick={() => {
-                        handleAnalyzeLogs(manualLogText, "Manual log upload");
-                        setActiveTab("Dashboard");
-                      }}
-                      className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl text-xs shadow-md shadow-blue-900/20 flex items-center gap-2 cursor-pointer transition-all self-end"
+                      onClick={handleAnalyzePastedText}
+                      disabled={!pastedText.trim()}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-md"
                     >
                       <Sparkles className="w-3.5 h-3.5" />
-                      Run Diagnostic Analysis
+                      Analyze Pasted Stream
                     </button>
                   </div>
                 </div>
+
               </div>
 
-              {/* Sample Logs Cheat Sheet */}
-              <div className="bg-[#161B22] border border-[#30363D] p-6 rounded-2xl shadow-sm">
-                <h3 className="text-sm font-semibold text-white uppercase tracking-tight mb-3">Diagnostic Cheatsheet</h3>
-                <p className="text-xs text-slate-500 mb-4">
-                  These common parameters are recognized by the TRIRIGA Copilot to trigger alerting states:
-                </p>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-xs font-mono">
-                  <div className="p-3.5 bg-[#0A0B0E] border border-[#30363D] rounded-xl space-y-1">
-                    <span className="text-[10px] font-bold text-rose-500 uppercase tracking-wider block">CPU SPIKE</span>
-                    <span className="text-white">"Sustained CPU at 88%"</span>
-                    <p className="text-[10px] text-slate-500">Trigger: CPU sustained above 80% limit</p>
-                  </div>
-                  <div className="p-3.5 bg-[#0A0B0E] border border-[#30363D] rounded-xl space-y-1">
-                    <span className="text-[10px] font-bold text-rose-500 uppercase tracking-wider block">JVM MEMORY LEAK</span>
-                    <span className="text-white">"java.lang.OutOfMemoryError"</span>
-                    <p className="text-[10px] text-slate-500">Trigger: JVM Heap not recovering after Full GC</p>
-                  </div>
-                  <div className="p-3.5 bg-[#0A0B0E] border border-[#30363D] rounded-xl space-y-1">
-                    <span className="text-[10px] font-bold text-amber-500 uppercase tracking-wider block">CACHE STORM</span>
-                    <span className="text-white">"Cache Miss Ratio: 27.32%"</span>
-                    <p className="text-[10px] text-slate-500">Trigger: Cache Miss Ratio &gt; 15.0%</p>
-                  </div>
-                  <div className="p-3.5 bg-[#0A0B0E] border border-[#30363D] rounded-xl space-y-1">
-                    <span className="text-[10px] font-bold text-amber-500 uppercase tracking-wider block">WORKFLOW LOCK</span>
-                    <span className="text-white">"StateTransitionException"</span>
-                    <p className="text-[10px] text-slate-500">Trigger: Asynchronous process failure &gt; 2.0%</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 3: TRIRIGA BEST PRACTICES & REFERENCE VIEW */}
-          {activeTab === "TRIRIGABestPractices" && (
-            <div id="tab-practices-view" className="space-y-8 animate-fade-in">
-              
-              <div className="bg-[#161B22] border border-[#30363D] p-6 rounded-2xl shadow-sm">
-                <div className="flex items-start gap-4 mb-6">
-                  <div className="p-3 bg-blue-950/40 text-blue-400 rounded-xl border border-blue-900/50">
-                    <BookOpen className="w-6 h-6" />
-                  </div>
+              {/* Quick Load Presets Side Rail */}
+              <div className="space-y-4">
+                <div className="bg-[#0F1115] border border-[#21262D] rounded-2xl p-5 space-y-4">
                   <div>
-                    <h2 className="text-base font-bold text-white">
-                      IBM TRIRIGA Tuning & Observability Reference
-                    </h2>
-                    <p className="text-xs text-slate-500">
-                      Standard industry best practices to prevent database lock contention and optimize WebSphere JVMs.
+                    <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <Sliders className="w-3.5 h-3.5 text-indigo-400" />
+                      Diagnostic Presets
+                    </h3>
+                    <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+                      Experience the full system immediately! Load isolated multi-log scenarios with 1 click:
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <button
+                      onClick={() => handleLoadPresets("all")}
+                      className="w-full text-left p-3 bg-gradient-to-r from-blue-900/30 to-indigo-900/30 hover:from-blue-900/40 hover:to-indigo-900/40 border border-blue-800/30 rounded-xl flex items-center justify-between group transition-all cursor-pointer"
+                    >
+                      <div>
+                        <span className="text-xs font-bold text-white group-hover:text-blue-300 block transition-colors">
+                          Load All Presets
+                        </span>
+                        <span className="text-[9px] text-slate-400 block mt-0.5">
+                          Loads 4 separate files at once (10 results expected!)
+                        </span>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-blue-500 group-hover:translate-x-0.5 transition-all" />
+                    </button>
+
+                    <div className="h-[1px] bg-[#21262D] my-2"></div>
+
+                    <button
+                      onClick={() => handleLoadPresets("server")}
+                      className="w-full text-left p-2.5 bg-[#1B2028]/30 hover:bg-[#1B2028]/60 border border-[#21262D] rounded-xl flex items-center justify-between group transition-all cursor-pointer"
+                    >
+                      <div>
+                        <span className="text-[11px] font-bold text-slate-200 block">
+                          📄 tririga_server_error_stream.log
+                        </span>
+                        <span className="text-[9px] text-slate-500 block mt-0.5">
+                          Category: Server Deadlock & Row Lock Exceptions
+                        </span>
+                      </div>
+                      <Eye className="w-3.5 h-3.5 text-slate-500 group-hover:text-slate-300 transition-all" />
+                    </button>
+
+                    <button
+                      onClick={() => handleLoadPresets("gc")}
+                      className="w-full text-left p-2.5 bg-[#1B2028]/30 hover:bg-[#1B2028]/60 border border-[#21262D] rounded-xl flex items-center justify-between group transition-all cursor-pointer"
+                    >
+                      <div>
+                        <span className="text-[11px] font-bold text-slate-200 block">
+                          📄 ibm_websphere_g1gc_metrics.log
+                        </span>
+                        <span className="text-[9px] text-slate-500 block mt-0.5">
+                          Category: JVM Memory Staircase Heap Leak
+                        </span>
+                      </div>
+                      <Eye className="w-3.5 h-3.5 text-slate-500 group-hover:text-slate-300 transition-all" />
+                    </button>
+
+                    <button
+                      onClick={() => handleLoadPresets("metrics")}
+                      className="w-full text-left p-2.5 bg-[#1B2028]/30 hover:bg-[#1B2028]/60 border border-[#21262D] rounded-xl flex items-center justify-between group transition-all cursor-pointer"
+                    >
+                      <div>
+                        <span className="text-[11px] font-bold text-slate-200 block">
+                          📄 tririga_thread_monitor_dump.log
+                        </span>
+                        <span className="text-[9px] text-slate-500 block mt-0.5">
+                          Category: Sustained CPU Thread Spike
+                        </span>
+                      </div>
+                      <Eye className="w-3.5 h-3.5 text-slate-500 group-hover:text-slate-300 transition-all" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Scope Warning / Platform Assurance Card */}
+                <div className="bg-[#111A1E] border border-blue-900/30 rounded-2xl p-4 flex gap-3">
+                  <ShieldCheck className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider block">
+                      Offline Confidential Parse
+                    </span>
+                    <p className="text-[10px] text-slate-400 leading-relaxed">
+                      All calculations are isolated client-side for maximum compliance and speed. Your raw database metrics and application keys never leave your terminal workspace.
                     </p>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4">
-                  {/* Item 1 */}
-                  <div className="space-y-3">
-                    <h3 className="text-xs font-extrabold uppercase text-slate-400 tracking-wider">
-                      1. JVM Garbage Collection Configuration
-                    </h3>
-                    <p className="text-xs text-slate-300 leading-relaxed font-sans">
-                      By default, TRIRIGA application servers should utilize the Garbage First Garbage Collector (G1GC) rather than ParallelGC. This avoids prolonged, stop-the-world pauses that cascade into connection pool timeouts.
-                    </p>
-                    <div className="relative">
-                      <pre className="text-[11px] bg-[#111827] text-slate-300 rounded-lg p-3.5 font-mono overflow-x-auto border border-[#30363D]">
-{`-Xmx8g -Xms8g -XX:+UseG1GC 
--XX:MaxGCPauseMillis=200 
--XX:InitiatingHeapOccupancyPercent=45`}
-                      </pre>
-                      <button
-                        onClick={() => handleCopyText("-Xmx8g -Xms8g -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:InitiatingHeapOccupancyPercent=45")}
-                        className="absolute right-2 top-2 p-1.5 bg-[#161B22] border border-[#30363D] text-slate-400 hover:text-white rounded transition-all cursor-pointer"
-                      >
-                        <Copy className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
+              </div>
 
-                  {/* Item 2 */}
-                  <div className="space-y-3">
-                    <h3 className="text-xs font-extrabold uppercase text-slate-400 tracking-wider">
-                      2. Object Cache Configuration (custom.properties)
-                    </h3>
-                    <p className="text-xs text-slate-300 leading-relaxed font-sans">
-                      If the Object Cache size is too small, TRIRIGA continually evicts elements to load new record metadata. Ensure limits are scaled for enterprise portfolios (classifications and forms).
-                    </p>
-                    <div className="relative">
-                      <pre className="text-[11px] bg-[#111827] text-slate-300 rounded-lg p-3.5 font-mono overflow-x-auto border border-[#30363D]">
-{`# custom.properties
-OBJECT_CACHE_SIZE_LIMIT=100000
-GUI_CACHE_SIZE_LIMIT=15000
-METADATA_CACHE_SIZE_LIMIT=50000`}
-                      </pre>
-                      <button
-                        onClick={() => handleCopyText("OBJECT_CACHE_SIZE_LIMIT=100000\nGUI_CACHE_SIZE_LIMIT=15000\nMETADATA_CACHE_SIZE_LIMIT=50000")}
-                        className="absolute right-2 top-2 p-1.5 bg-[#161B22] border border-[#30363D] text-slate-400 hover:text-white rounded transition-all cursor-pointer"
-                      >
-                        <Copy className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
+            </div>
+          </main>
+        )}
 
-                  {/* Item 3 */}
-                  <div className="space-y-3">
-                    <h3 className="text-xs font-extrabold uppercase text-slate-400 tracking-wider">
-                      3. Compound Database Indexing (PostgreSQL/Oracle)
-                    </h3>
-                    <p className="text-xs text-slate-300 leading-relaxed font-sans">
-                      Table scans on transaction tables like <code className="font-mono text-blue-400">T_SPACE</code> or <code className="font-mono text-blue-400">T_WORK_ORDER</code> consume excessive CPU. Implement compound keys to accelerate lease/space workflows.
-                    </p>
-                    <div className="relative">
-                      <pre className="text-[11px] bg-[#111827] text-slate-300 rounded-lg p-3.5 font-mono overflow-x-auto border border-[#30363D]">
-{`-- Speed up Space allocation lookups
-CREATE INDEX IX_T_SPACE_ALLOCATION 
-ON T_SPACE (triSpaceTypeTX, parent_id) 
-WHERE triSpaceTypeTX IS NOT NULL;`}
-                      </pre>
-                      <button
-                        onClick={() => handleCopyText("CREATE INDEX IX_T_SPACE_ALLOCATION ON T_SPACE (triSpaceTypeTX, parent_id) WHERE triSpaceTypeTX IS NOT NULL;")}
-                        className="absolute right-2 top-2 p-1.5 bg-[#161B22] border border-[#30363D] text-slate-400 hover:text-white rounded transition-all cursor-pointer"
-                      >
-                        <Copy className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
+        {/* ======================= PHASE 2: PROCESSING PIPELINE ======================= */}
+        {appState === "processing" && filesToProcess.length > 0 && (
+          <main className="max-w-md mx-auto px-4 py-24 animate-fade-in">
+            <div className="bg-[#0F1115] border border-[#21262D] rounded-2xl p-6 shadow-2xl space-y-6">
+              
+              <div className="text-center space-y-2">
+                <Loader2 className="w-8 h-8 text-blue-500 animate-spin mx-auto" />
+                <h3 className="text-sm font-bold text-white tracking-tight">
+                  IBM TRIRIGA Copilot Engine Active
+                </h3>
+                <p className="text-[11px] text-slate-500 uppercase tracking-widest font-mono">
+                  Isolating Log Streams
+                </p>
+              </div>
 
-                  {/* Item 4 */}
-                  <div className="space-y-3">
-                    <h3 className="text-xs font-extrabold uppercase text-slate-400 tracking-wider">
-                      4. Workflow Lock contention Remediation
-                    </h3>
-                    <p className="text-xs text-slate-300 leading-relaxed font-sans">
-                      Avoid running parallel asynchronous workflows on overlapping business objects. Check for stale locks in the workflow event queue using database state indicators.
-                    </p>
-                    <div className="relative">
-                      <pre className="text-[11px] bg-[#111827] text-slate-300 rounded-lg p-3.5 font-mono overflow-x-auto border border-[#30363D]">
-{`SELECT EVENT_ID, EVENT_NAME, WF_STATUS 
-FROM WF_EVENT_HISTORY 
-WHERE WF_STATUS = 'LOCKED' 
-ORDER BY CREATED_DATE DESC;`}
-                      </pre>
-                      <button
-                        onClick={() => handleCopyText("SELECT EVENT_ID, EVENT_NAME, WF_STATUS FROM WF_EVENT_HISTORY WHERE WF_STATUS = 'LOCKED' ORDER BY CREATED_DATE DESC;")}
-                        className="absolute right-2 top-2 p-1.5 bg-[#161B22] border border-[#30363D] text-slate-400 hover:text-white rounded transition-all cursor-pointer"
+              {/* Progress Detail Frame */}
+              <div className="bg-[#08090C] border border-[#21262D] rounded-xl p-4 space-y-3">
+                <div className="flex justify-between items-center text-[11px] font-mono">
+                  <span className="text-slate-400">File {processingIndex + 1} of {filesToProcess.length}</span>
+                  <span className="text-blue-400 font-bold">{processingProgress}%</span>
+                </div>
+
+                {/* Progress bar */}
+                <div className="w-full bg-[#1B2028] h-1.5 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-blue-500 transition-all duration-150 ease-out"
+                    style={{ width: `${processingProgress}%` }}
+                  ></div>
+                </div>
+
+                <div className="space-y-1">
+                  <span className="text-[10px] text-slate-500 block">Analyzing Resource:</span>
+                  <span className="text-xs font-bold text-white block truncate">
+                    {filesToProcess[processingIndex]?.name || "Finalizing..."}
+                  </span>
+                  <p className="text-[10px] text-blue-400 font-mono mt-2 animate-pulse min-h-4">
+                    {processingStep}
+                  </p>
+                </div>
+              </div>
+
+              {/* Logs Processing Details summary */}
+              <div className="space-y-2">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                  Processing Queue List
+                </span>
+                <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                  {filesToProcess.map((file, idx) => {
+                    const isDone = idx < processingIndex;
+                    const isCurrent = idx === processingIndex;
+
+                    return (
+                      <div
+                        key={`q-${idx}`}
+                        className={`flex justify-between items-center text-[10px] p-2 rounded-lg border font-mono ${
+                          isDone
+                            ? "bg-emerald-950/20 border-emerald-900/30 text-emerald-400"
+                            : isCurrent
+                            ? "bg-blue-950/20 border-blue-900/30 text-blue-400 animate-pulse"
+                            : "bg-[#08090C] border-[#21262D] text-slate-600"
+                        }`}
                       >
-                        <Copy className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
+                        <span className="truncate max-w-[240px]">{file.name}</span>
+                        <span>
+                          {isDone ? (
+                            "COMPLETED"
+                          ) : isCurrent ? (
+                            `ANALYZING (${processingProgress}%)`
+                          ) : (
+                            "QUEUED"
+                          )}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
             </div>
-          )}
+          </main>
+        )}
 
-        </main>
+        {/* ======================= PHASE 3: DIAGNOSTICS DASHBOARD ======================= */}
+        {appState === "dashboard" && activeFile && (
+          <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+            
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+              
+              {/* SIDEBAR: MULTI-FILE QUEUE SELECTOR */}
+              <aside className="lg:col-span-1 space-y-4">
+                
+                <div className="bg-[#0F1115] border border-[#21262D] rounded-2xl p-4.5 space-y-4">
+                  
+                  <div className="flex justify-between items-center pb-2 border-b border-[#21262D]">
+                    <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <Database className="w-3.5 h-3.5 text-blue-400" />
+                      Analyzed Logs ({analyzedFiles.length})
+                    </span>
+                    <button
+                      onClick={() => setAppState("upload")}
+                      className="p-1 bg-[#1B2028] hover:bg-[#21262D] text-slate-400 hover:text-white rounded border border-[#2D333B] transition-all cursor-pointer"
+                      title="Upload more files"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
 
-        {/* Workspace Footer */}
-        <footer className="border-t border-[#30363D] bg-[#161B22] py-6 transition-colors">
-          <div className="max-w-7xl mx-auto px-4 text-center text-xs text-slate-500 font-mono flex flex-col sm:flex-row justify-between items-center gap-3">
-            <span>Enterprise TRIRIGA Observability & Performance Copilot © 2026</span>
+                  {/* Sidebar Queue list of individual results */}
+                  <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
+                    {analyzedFiles.map((file) => {
+                      const isActive = file.id === activeFileId;
+                      const fileHealth = getHealthScore(file);
+                      
+                      const fileTypeLabel = {
+                        server: "Server Log",
+                        performance: "JVM Performance",
+                        metrics: "System Metrics"
+                      }[file.type];
+
+                      const fileTypeColor = {
+                        server: "bg-[#21262D] text-slate-300 border-[#30363D]",
+                        performance: "bg-emerald-950/20 text-emerald-400 border-emerald-900/30",
+                        metrics: "bg-purple-950/20 text-purple-400 border-purple-900/30"
+                      }[file.type];
+
+                      return (
+                        <div
+                          key={file.id}
+                          onClick={() => setActiveFileId(file.id)}
+                          className={`p-3 rounded-xl border cursor-pointer transition-all flex flex-col justify-between gap-2.5 relative group ${
+                            isActive
+                              ? "bg-[#1C212B] border-blue-500/60 shadow-lg shadow-blue-900/5"
+                              : "bg-[#12151A] border-[#21262D] hover:border-slate-700"
+                          }`}
+                        >
+                          {/* Remove button */}
+                          <button
+                            onClick={(e) => handleRemoveFile(file.id, e)}
+                            className="absolute top-2 right-2 p-1 text-slate-500 hover:text-rose-400 rounded-md hover:bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-all"
+                            title="Remove log from workspace"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+
+                          <div className="space-y-1">
+                            <span className="text-[11px] font-bold text-white block truncate max-w-[190px]">
+                              {file.name}
+                            </span>
+                            <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border inline-block ${fileTypeColor}`}>
+                              {fileTypeLabel}
+                            </span>
+                          </div>
+
+                          <div className="flex justify-between items-center text-[10px] font-mono border-t border-[#21262D]/50 pt-2 text-slate-500">
+                            <span>{(file.size / 1024).toFixed(1)} KB</span>
+                            <div className="flex items-center gap-1">
+                              <span className={`w-1.5 h-1.5 rounded-full ${
+                                file.results.status === "Critical"
+                                  ? "bg-rose-500"
+                                  : file.results.status === "Degraded"
+                                  ? "bg-amber-500"
+                                  : "bg-emerald-500"
+                              }`} />
+                              <span className="font-bold">Health: {fileHealth}</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Diagnostic stats summary info */}
+                  <div className="bg-[#08090C] border border-[#21262D] p-3 rounded-xl space-y-2">
+                    <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block">
+                      Queue Summary
+                    </span>
+                    <ul className="space-y-1 text-[10px] font-mono text-slate-400">
+                      <li className="flex justify-between">
+                        <span>Active Stream:</span>
+                        <span className="text-blue-400 font-bold max-w-[110px] truncate">{activeFile.name}</span>
+                      </li>
+                      <li className="flex justify-between">
+                        <span>Total Records:</span>
+                        <span>{analyzedFiles.reduce((acc, f) => acc + f.lineCount, 0)} lines</span>
+                      </li>
+                    </ul>
+                  </div>
+
+                </div>
+
+                {/* OBSERVED STANDARDS INJECTED REFERENCE BOX */}
+                <div className="bg-[#0F1115] border border-[#21262D] rounded-2xl p-4 text-xs space-y-2">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                    Observability Thresholds
+                  </span>
+                  <div className="space-y-1.5 font-mono text-[10px] text-slate-500">
+                    <div className="flex justify-between border-b border-[#21262D]/40 pb-1">
+                      <span>Sustained CPU max limit:</span>
+                      <span className="text-slate-300 font-bold">&gt; 80%</span>
+                    </div>
+                    <div className="flex justify-between border-b border-[#21262D]/40 pb-1">
+                      <span>GC heap recovery rate:</span>
+                      <span className="text-slate-300 font-bold">&lt; 5%</span>
+                    </div>
+                    <div className="flex justify-between border-b border-[#21262D]/40 pb-1">
+                      <span>Object Cache miss storm:</span>
+                      <span className="text-slate-300 font-bold">&gt; 15%</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Workflow task failures:</span>
+                      <span className="text-slate-300 font-bold">&gt; 2%</span>
+                    </div>
+                  </div>
+                </div>
+
+              </aside>
+
+              {/* MAIN PORTAL AREA: ISOLATED REPORTS AND LOG DETAIL VIEWS */}
+              <section className="lg:col-span-3 space-y-6">
+                
+                {/* ACTIVE FILE SPECIFIC REPORT HEADER CARD */}
+                <div className="bg-[#0F1115] border border-[#21262D] p-5.5 rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-sm relative overflow-hidden">
+                  
+                  {/* Decorative glowing background accent specific to health status */}
+                  <div className={`absolute top-0 right-0 w-32 h-32 blur-3xl opacity-5 pointer-events-none rounded-full ${
+                    activeFile.results.status === "Critical"
+                      ? "bg-rose-500"
+                      : activeFile.results.status === "Degraded"
+                      ? "bg-amber-500"
+                      : "bg-emerald-500"
+                  }`}></div>
+
+                  <div className="space-y-2.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h2 className="text-base font-extrabold text-white tracking-tight">
+                        {activeFile.name}
+                      </h2>
+                      <span className="text-[10px] font-mono bg-[#1B2028] text-slate-400 border border-[#2D333B] px-2 py-0.5 rounded">
+                        {(activeFile.size / 1024).toFixed(1)} KB
+                      </span>
+                      <span className="text-[10px] font-mono bg-[#1B2028] text-slate-400 border border-[#2D333B] px-2 py-0.5 rounded">
+                        {activeFile.lineCount} lines
+                      </span>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-slate-400">
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5 text-slate-500" />
+                        Date range: <strong className="text-slate-300 font-medium">{activeFile.dateRange}</strong>
+                      </span>
+                      <span className="hidden sm:inline text-slate-600">•</span>
+                      <span>
+                        Duration span: <strong className="text-slate-300 font-medium">{activeFile.duration}</strong>
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* ACTIVE FILE HEALTH SCORE SHIELD */}
+                  <div className="flex items-center gap-3 bg-[#08090C] border border-[#21262D] p-3 rounded-xl min-w-[150px] justify-between shadow-inner">
+                    <div className="space-y-0.5">
+                      <span className="text-[9px] text-slate-500 uppercase tracking-wider font-bold block">Health Score</span>
+                      <span className="text-sm font-extrabold font-mono text-white block">
+                        {activeHealthScore}/100
+                      </span>
+                    </div>
+                    <span className={`px-2 py-1 rounded text-[10px] font-bold ${
+                      activeFile.results.status === "Critical"
+                        ? "bg-rose-950/30 text-rose-400 border border-rose-900/40"
+                        : activeFile.results.status === "Degraded"
+                        ? "bg-amber-950/30 text-amber-400 border border-amber-900/40"
+                        : "bg-emerald-950/30 text-emerald-400 border border-emerald-900/40"
+                    }`}>
+                      {activeFile.results.status}
+                    </span>
+                  </div>
+
+                </div>
+
+                {/* DYNAMIC TAB CONTROLS (Hiding unavailable views per file type!) */}
+                <div className="flex border-b border-[#21262D] pb-0">
+                  <button
+                    onClick={() => setActiveTab("overview")}
+                    className={`pb-3 text-xs font-semibold px-4 border-b-2 transition-all cursor-pointer ${
+                      activeTab === "overview"
+                        ? "border-blue-500 text-white"
+                        : "border-transparent text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    Executive Overview
+                  </button>
+                  
+                  {/* Dynamic Tab 2: Server Logs Details (ONLY accessible for server logs!) */}
+                  {activeFile.type === "server" && (
+                    <button
+                      onClick={() => setActiveTab("details")}
+                      className={`pb-3 text-xs font-semibold px-4 border-b-2 transition-all cursor-pointer ${
+                        activeTab === "details"
+                          ? "border-blue-500 text-white"
+                          : "border-transparent text-slate-400 hover:text-white"
+                      }`}
+                    >
+                      Server Trace Details
+                    </button>
+                  )}
+
+                  {/* Dynamic Tab 2: JVM Performance & GC (ONLY accessible for performance logs!) */}
+                  {activeFile.type === "performance" && (
+                    <button
+                      onClick={() => setActiveTab("details")}
+                      className={`pb-3 text-xs font-semibold px-4 border-b-2 transition-all cursor-pointer ${
+                        activeTab === "details"
+                          ? "border-blue-500 text-white"
+                          : "border-transparent text-slate-400 hover:text-white"
+                      }`}
+                    >
+                      JVM Heap & Cache Miss Detailed Analytics
+                    </button>
+                  )}
+
+                  {/* Dynamic Tab 2: System Metrics (ONLY accessible for metrics logs!) */}
+                  {activeFile.type === "metrics" && (
+                    <button
+                      onClick={() => setActiveTab("details")}
+                      className={`pb-3 text-xs font-semibold px-4 border-b-2 transition-all cursor-pointer ${
+                        activeTab === "details"
+                          ? "border-blue-500 text-white"
+                          : "border-transparent text-slate-400 hover:text-white"
+                      }`}
+                    >
+                      CPU & WebContainer Detailed Analytics
+                    </button>
+                  )}
+                </div>
+
+                {/* ===================== VIEW A: EXECUTIVE OVERVIEW (AVAILABLE TO ALL FILE TYPES) ===================== */}
+                {activeTab === "overview" && (
+                  <div className="space-y-6 animate-fade-in">
+                    
+                    {/* Summary row */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                      
+                      {/* AI Executive Summary Block */}
+                      <div className="md:col-span-2 bg-[#0F1115] border border-[#21262D] p-5 rounded-2xl flex flex-col justify-between relative min-h-[160px]">
+                        <div className="absolute top-4 right-4 flex items-center gap-1.5 px-2 py-0.5 bg-[#08090C] border border-[#21262D] rounded text-[9px] font-bold text-blue-400 font-mono">
+                          <Sparkles className="w-3 h-3 animate-pulse" />
+                          RCA ENGINE COMPRESSED
+                        </div>
+
+                        <div className="space-y-2">
+                          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                            Executive Platform Assessment
+                          </h3>
+                          <p className="text-xs text-slate-200 leading-relaxed font-sans">
+                            {activeFile.results.executiveSummary}
+                          </p>
+                        </div>
+
+                        <div className="text-[10px] text-slate-500 font-mono border-t border-[#21262D]/50 pt-3 mt-3 flex justify-between">
+                          <span>Report Target File: <strong className="text-slate-400">{activeFile.name}</strong></span>
+                          {activeFile.results.metrics.avgResponseTimeMs && (
+                            <span>Avg Execution Latency: <strong className="text-blue-400">{activeFile.results.metrics.avgResponseTimeMs}ms</strong></span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Health Status Indicator */}
+                      <div className="bg-[#0F1115] border border-[#21262D] p-5 rounded-2xl flex flex-col items-center justify-center text-center space-y-2">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                          Platform Status Indicator
+                        </span>
+                        
+                        <div className={`p-4 rounded-full border ${
+                          activeFile.results.status === "Critical"
+                            ? "bg-rose-950/20 border-rose-950 text-rose-400"
+                            : activeFile.results.status === "Degraded"
+                            ? "bg-amber-950/20 border-amber-950 text-amber-400"
+                            : "bg-emerald-950/20 border-emerald-950 text-emerald-400"
+                        }`}>
+                          {activeFile.results.status === "Critical" && <XCircle className="w-8 h-8" />}
+                          {activeFile.results.status === "Degraded" && <AlertTriangle className="w-8 h-8" />}
+                          {activeFile.results.status === "Healthy" && <CheckCircle2 className="w-8 h-8" />}
+                        </div>
+
+                        <div className="space-y-1">
+                          <span className="text-xs font-bold text-white block">
+                            Platform Status: {activeFile.results.status.toUpperCase()}
+                          </span>
+                          <span className="text-[9px] text-slate-500 block leading-relaxed font-mono">
+                            {activeFile.results.status === "Healthy" 
+                              ? "Baseline meets all operational limits" 
+                              : "Threshold limits violated in logs"
+                            }
+                          </span>
+                        </div>
+                      </div>
+
+                    </div>
+
+                    {/* Standard Telemetry Cards specific to active file metrics (hiding / showing data dynamically) */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-5">
+                      <MetricCard
+                        title="Sustained Max CPU"
+                        value={activeFile.results.metrics.cpuMax !== null ? `${activeFile.results.metrics.cpuMax.toFixed(1)}%` : "N/A"}
+                        subtext="WebContainer Threads"
+                        metricType="cpu"
+                        metrics={activeFile.results.metrics}
+                      />
+                      <MetricCard
+                        title="JVM Heap Trend"
+                        value={activeFile.results.metrics.memoryTrend}
+                        subtext={activeFile.results.metrics.memoryLeakRisk !== "Unknown" ? `Risk: ${activeFile.results.metrics.memoryLeakRisk}` : "Risk: N/A"}
+                        metricType="memory"
+                        metrics={activeFile.results.metrics}
+                      />
+                      <MetricCard
+                        title="Cache Miss Ratio"
+                        value={activeFile.results.metrics.cacheMissRatio !== null ? `${activeFile.results.metrics.cacheMissRatio.toFixed(1)}%` : "N/A"}
+                        subtext="Object/GUI Cache"
+                        metricType="cache"
+                        metrics={activeFile.results.metrics}
+                      />
+                      <MetricCard
+                        title="WF Failure Rate"
+                        value={activeFile.results.metrics.workflowFailureRate !== null ? `${activeFile.results.metrics.workflowFailureRate.toFixed(1)}%` : "N/A"}
+                        subtext={activeFile.results.metrics.workflowFailureRate !== null ? `${activeFile.results.metrics.totalWorkflowsFailed}/${activeFile.results.metrics.totalWorkflowsProcessed} failed` : "No workflow logs"}
+                        metricType="workflow"
+                        metrics={activeFile.results.metrics}
+                      />
+                    </div>
+
+                    {/* Root cause Markdown Analysis Detail & Recommendations row */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      
+                      {/* Left Block: Anomaly Feedspecific to active log file */}
+                      <div className="bg-[#0F1115] border border-[#21262D] p-5 rounded-2xl space-y-4">
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 pb-2 border-b border-[#21262D]">
+                          <div>
+                            <h3 className="text-xs font-bold text-white uppercase tracking-wider">
+                              Anomalies & Alerts Feed
+                            </h3>
+                            <p className="text-[10px] text-slate-500 mt-0.5">
+                              Alert thresholds filtered for this file
+                            </p>
+                          </div>
+                          
+                          <select
+                            value={alertFilter}
+                            onChange={(e) => setAlertFilter(e.target.value as AlertFilter)}
+                            className="bg-[#08090C] border border-[#21262D] text-slate-300 text-[10px] rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer font-mono"
+                          >
+                            <option value="ALL">All Levels</option>
+                            <option value="Critical">Critical</option>
+                            <option value="Warning">Warning</option>
+                            <option value="Info">Info</option>
+                          </select>
+                        </div>
+
+                        {/* Alert search */}
+                        <div className="relative">
+                          <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2.5" />
+                          <input
+                            type="text"
+                            placeholder="Filter anomalies..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="w-full bg-[#08090C] border border-[#21262D] text-slate-300 text-[10px] rounded pl-8 pr-3 py-2.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          />
+                        </div>
+
+                        {/* List of anomalies in active file */}
+                        <div className="space-y-2.5 max-h-[300px] overflow-y-auto pr-1">
+                          {getFilteredAnomalies().length === 0 ? (
+                            <div className="text-center py-8 border border-dashed border-[#21262D] rounded-xl">
+                              <CheckCircle2 className="w-6 h-6 text-emerald-500 mx-auto mb-1.5" />
+                              <p className="text-[10px] text-slate-500 font-bold font-mono">Zero active anomalies detected</p>
+                            </div>
+                          ) : (
+                            getFilteredAnomalies().map((anomaly, idx) => {
+                              const alertStyles = {
+                                Critical: "bg-rose-950/15 border-rose-900/30 text-rose-400",
+                                Warning: "bg-amber-950/15 border-amber-900/30 text-amber-400",
+                                Info: "bg-blue-950/15 border-blue-900/30 text-blue-400"
+                              }[anomaly.severity];
+
+                              return (
+                                <div
+                                  key={`alert-${idx}`}
+                                  className={`p-3 border rounded-xl space-y-1.5 transition-all text-[11px] ${alertStyles}`}
+                                >
+                                  <div className="flex justify-between items-start">
+                                    <span className="font-bold tracking-tight">{anomaly.title}</span>
+                                    <span className="text-[8px] font-bold uppercase px-1 py-0.25 rounded border border-current">
+                                      {anomaly.severity}
+                                    </span>
+                                  </div>
+                                  <p className="opacity-90 leading-relaxed font-sans">{anomaly.description}</p>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Right Block: Markdown RCA and Actionable Tuning recommendations (takes 2 cols) */}
+                      <div className="md:col-span-2 space-y-6">
+                        
+                        {/* RCA Card */}
+                        <div className="bg-[#0F1115] border border-[#21262D] p-5 rounded-2xl">
+                          <h3 className="text-xs font-bold text-white uppercase tracking-wider mb-4 flex items-center gap-1.5">
+                            <Code className="w-4 h-4 text-blue-500" />
+                            Root Cause Analysis (RCA) Detail
+                          </h3>
+
+                          <div className="text-xs leading-relaxed space-y-3 font-sans text-slate-300">
+                            {activeFile.results.rca.split("\n\n").map((block, bIdx) => {
+                              if (block.startsWith("###")) {
+                                return (
+                                  <h4 key={`rca-h-${bIdx}`} className="text-xs font-bold text-slate-200 mt-4 mb-2 uppercase tracking-wide border-b border-[#21262D]/40 pb-1 flex items-center gap-1.5">
+                                    {block.replace("###", "").trim()}
+                                  </h4>
+                                );
+                              }
+                              if (block.includes("1. ") || block.includes("2. ") || block.includes("3. ")) {
+                                return (
+                                  <ul key={`rca-ul-${bIdx}`} className="space-y-1.5 pl-4 list-disc">
+                                    {block.split("\n").map((li, lIdx) => (
+                                      <li key={`rca-li-${lIdx}`} className="text-slate-300">
+                                        {li.replace(/^\d+\.\s+\*\*/, "").replace(/\*\*/g, "").trim()}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                );
+                              }
+                              return <p key={`rca-p-${bIdx}`} className="text-slate-300">{block}</p>;
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Actionable Recommendations */}
+                        <div className="bg-[#0F1115] border border-[#21262D] p-5 rounded-2xl space-y-4">
+                          <div>
+                            <h3 className="text-xs font-bold text-white uppercase tracking-wider">
+                              Actionable Tuning Recommendations
+                            </h3>
+                            <p className="text-[10px] text-slate-500 mt-0.5">
+                              Apply recommended fixes specific to patterns found in this stream
+                            </p>
+                          </div>
+
+                          <div className="space-y-3">
+                            {activeFile.results.recommendations.length === 0 ? (
+                              <div className="text-center py-6 border border-dashed border-[#21262D] rounded-xl text-[11px] text-slate-500">
+                                No recommendations required for this baseline.
+                              </div>
+                            ) : (
+                              activeFile.results.recommendations.map((recommendation, idx) => (
+                                <div
+                                  key={`rec-${idx}`}
+                                  className="bg-[#08090C] border border-[#21262D] p-4 rounded-xl space-y-2.5"
+                                >
+                                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-1">
+                                    <span className="font-bold text-xs text-white">
+                                      {recommendation.title}
+                                    </span>
+                                    <span className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded border ${
+                                      recommendation.category === "Property Edit"
+                                        ? "bg-blue-950/20 text-blue-400 border-blue-900/30"
+                                        : recommendation.category === "DB Query"
+                                        ? "bg-emerald-950/20 text-emerald-400 border-emerald-900/30"
+                                        : "bg-purple-950/20 text-purple-400 border-purple-900/30"
+                                    }`}>
+                                      {recommendation.category}
+                                    </span>
+                                  </div>
+
+                                  <p className="text-[11px] text-slate-300 leading-relaxed font-sans">
+                                    {recommendation.description}
+                                  </p>
+
+                                  {recommendation.codeSnippet && (
+                                    <div className="relative group">
+                                      <pre className="text-[10px] bg-[#0E1116] text-slate-300 rounded-lg p-3 font-mono overflow-x-auto border border-[#21262D] max-h-36">
+                                        {recommendation.codeSnippet}
+                                      </pre>
+                                      <button
+                                        onClick={() => handleCopyText(recommendation.codeSnippet || "")}
+                                        className="absolute right-2 top-2 p-1 bg-[#1B2028] hover:bg-[#21262D] border border-[#2D333B] text-slate-400 hover:text-white rounded cursor-pointer opacity-80 group-hover:opacity-100 transition-all"
+                                        title="Copy configuration snippet"
+                                      >
+                                        {copiedSnippet === recommendation.codeSnippet ? (
+                                          <Check className="w-3 h-3 text-emerald-400" />
+                                        ) : (
+                                          <Copy className="w-3 h-3" />
+                                        )}
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        </div>
+
+                      </div>
+
+                    </div>
+
+                  </div>
+                )}
+
+                {/* ===================== VIEW B: SERVER TRACE DETAILS (SERVER LOGS ONLY) ===================== */}
+                {activeTab === "details" && activeFile.type === "server" && (
+                  <div className="space-y-6 animate-fade-in">
+                    
+                    {/* Database & Workflow Contention Summary cards */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+                      <div className="bg-[#0F1115] border border-[#21262D] p-4.5 rounded-2xl space-y-1 shadow-sm">
+                        <span className="text-[9px] font-bold text-rose-500 uppercase tracking-widest block font-mono">Row lock exceptions</span>
+                        <span className="text-xl font-bold font-mono text-white block">
+                          {activeFile.parsedEvents.filter(e => e.message.toLowerCase().includes("lock") || e.message.toLowerCase().includes("deadlock")).length}
+                        </span>
+                        <p className="text-[10px] text-slate-500">Row block timeouts in database transaction threads</p>
+                      </div>
+
+                      <div className="bg-[#0F1115] border border-[#21262D] p-4.5 rounded-2xl space-y-1 shadow-sm">
+                        <span className="text-[9px] font-bold text-amber-500 uppercase tracking-widest block font-mono">Workflow Failures</span>
+                        <span className="text-xl font-bold font-mono text-white block">
+                          {activeFile.parsedEvents.filter(e => e.message.toLowerCase().includes("statetransitionexception") || e.message.toLowerCase().includes("workflow")).length}
+                        </span>
+                        <p className="text-[10px] text-slate-500">Failed state transitions in WF runtimes</p>
+                      </div>
+
+                      <div className="bg-[#0F1115] border border-[#21262D] p-4.5 rounded-2xl space-y-1 shadow-sm">
+                        <span className="text-[9px] font-bold text-blue-500 uppercase tracking-widest block font-mono">Total Log Events</span>
+                        <span className="text-xl font-bold font-mono text-white block">
+                          {activeFile.parsedEvents.length}
+                        </span>
+                        <p className="text-[10px] text-slate-500">Deterministic event streams parsed from file</p>
+                      </div>
+                    </div>
+
+                    {/* Interactive Logs Table Viewer */}
+                    <div className="bg-[#0F1115] border border-[#21262D] rounded-2xl overflow-hidden shadow-sm">
+                      <div className="p-5 border-b border-[#21262D] flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                        <div>
+                          <h3 className="text-xs font-bold text-white uppercase tracking-wider">
+                            Interactive Trace Event Explorer
+                          </h3>
+                          <p className="text-[10px] text-slate-500 mt-0.5 font-mono">
+                            Showing {activeFile.parsedEvents.length} structured records. Click any row to expand stack traces.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Log table */}
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="bg-[#08090C] border-b border-[#21262D] text-[10px] font-bold uppercase text-slate-400 font-mono">
+                              <th className="py-3 px-4 w-[160px]">Timestamp</th>
+                              <th className="py-3 px-4 w-[100px]">Level</th>
+                              <th className="py-3 px-4 w-[220px]">Component Logger</th>
+                              <th className="py-3 px-4">Message</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-[#21262D]/50 text-xs font-mono">
+                            {activeFile.parsedEvents.map((event) => {
+                              const isSelected = selectedEventId === event.id;
+                              
+                              const levelColors = {
+                                ERROR: "bg-rose-950/30 text-rose-400 border-rose-900/40",
+                                WARN: "bg-amber-950/30 text-amber-400 border-amber-900/40",
+                                INFO: "bg-blue-950/20 text-blue-400 border-blue-900/30",
+                                DEBUG: "bg-slate-950 text-slate-500 border-slate-900"
+                              }[event.level];
+
+                              return (
+                                <g key={event.id}>
+                                  <tr
+                                    onClick={() => setSelectedEventId(isSelected ? null : event.id)}
+                                    className={`hover:bg-[#1C212B]/35 cursor-pointer transition-colors ${
+                                      isSelected ? "bg-[#1C212B]/50" : ""
+                                    }`}
+                                  >
+                                    <td className="py-3.5 px-4 text-slate-500 text-[11px] font-mono whitespace-nowrap">
+                                      {event.timestamp}
+                                    </td>
+                                    <td className="py-3.5 px-4">
+                                      <span className={`px-1.5 py-0.25 rounded border text-[9px] font-bold inline-block ${levelColors}`}>
+                                        {event.level}
+                                      </span>
+                                    </td>
+                                    <td className="py-3.5 px-4 text-blue-400 font-mono truncate max-w-[220px]" title={event.logger}>
+                                      {event.logger.split(".").pop()}
+                                    </td>
+                                    <td className="py-3.5 px-4 text-slate-200 font-sans leading-normal">
+                                      {event.message}
+                                    </td>
+                                  </tr>
+                                  {isSelected && event.details && (
+                                    <tr>
+                                      <td colSpan={4} className="bg-[#08090C] py-4 px-6 border-y border-[#21262D]">
+                                        <div className="space-y-2">
+                                          <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block font-mono">
+                                            Contained stack trace & exception context:
+                                          </span>
+                                          <pre className="text-[10px] text-rose-300 bg-[#0E1116] p-4 rounded-xl border border-rose-950/40 font-mono overflow-x-auto leading-relaxed max-h-[280px]">
+                                            {event.details}
+                                          </pre>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  )}
+                                </g>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+
+                    </div>
+
+                  </div>
+                )}
+
+                {/* ===================== VIEW C: JVM HEAP & CACHE DETAILED ANALYTICS (PERFORMANCE ONLY) ===================== */}
+                {activeTab === "details" && activeFile.type === "performance" && (
+                  <div className="space-y-6 animate-fade-in">
+                    
+                    {/* Heap Charts */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      
+                      {/* Telemetry charts taking 2 columns */}
+                      <div className="md:col-span-2 space-y-4">
+                        <TelemetryChart
+                          metrics={activeFile.results.metrics}
+                          scenarioId="jvm-memory-leak"
+                        />
+                      </div>
+
+                      {/* Garbage collection diagnostics stats block */}
+                      <div className="bg-[#0F1115] border border-[#21262D] p-5 rounded-2xl flex flex-col justify-between shadow-sm relative">
+                        <div className="space-y-4">
+                          <h3 className="text-xs font-bold text-white uppercase tracking-wider border-b border-[#21262D]/40 pb-1.5 flex items-center gap-1.5">
+                            <Activity className="w-4 h-4 text-emerald-400" />
+                            GC Diagnostic Vector
+                          </h3>
+
+                          <div className="space-y-3 font-mono text-[11px]">
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">GC Sizing Policy:</span>
+                              <span className="text-white font-bold">G1GC (WebSphere optimized)</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">Stop-The-World (STW) Pauses:</span>
+                              <span className="text-rose-400 font-bold">Average 12,894ms</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">Heap Reclaimed/Cycle:</span>
+                              <span className="text-rose-500 font-bold">&lt; 1.1% (High Risk)</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">GC Overhead Limit Exceeded:</span>
+                              <span className="text-rose-400 font-bold">YES</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* GC warning indicator */}
+                        <div className="bg-rose-950/15 border border-rose-900/40 p-3.5 rounded-xl space-y-1.5 mt-4">
+                          <div className="flex items-center gap-1.5">
+                            <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                            <span className="text-[10px] font-bold text-rose-400 uppercase tracking-wider">Memory Leak Escalating</span>
+                          </div>
+                          <p className="text-[10px] text-slate-400 leading-normal">
+                            Telemetry indicates standard heap starvation. Reclaimed heap size does not recover baseline volumes, triggering cascading stop-the-world allocation failures.
+                          </p>
+                        </div>
+                      </div>
+
+                    </div>
+
+                    {/* Cache Miss storm details panel */}
+                    <div className="bg-[#0F1115] border border-[#21262D] rounded-2xl p-5.5 space-y-4.5">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 pb-2 border-b border-[#21262D]">
+                        <div>
+                          <h3 className="text-xs font-bold text-white uppercase tracking-wider">
+                            TRIRIGA Object & GUI Cache Miss Monitor
+                          </h3>
+                          <p className="text-[10px] text-slate-500 mt-0.5 font-mono">
+                            Identified capacity evictions and storm reload cycles from active trace
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        
+                        {/* Interactive Cache details table */}
+                        <div className="space-y-3">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block font-mono">
+                            Cache eviction warnings found in logs:
+                          </span>
+                          
+                          <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                            {activeFile.parsedEvents.filter(e => e.message.toLowerCase().includes("cache")).length === 0 ? (
+                              <div className="text-center py-8 text-[11px] text-slate-500 border border-dashed border-[#21262D] rounded-xl font-mono">
+                                No active cache eviction alerts detected. Cache miss ratio within safe thresholds.
+                              </div>
+                            ) : (
+                              activeFile.parsedEvents.filter(e => e.message.toLowerCase().includes("cache")).map((event, idx) => (
+                                <div key={`cache-ev-${idx}`} className="p-3 bg-[#08090C] border border-[#21262D] rounded-xl flex items-start gap-2.5">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0 mt-1.5" />
+                                  <div className="space-y-0.5">
+                                    <span className="text-[10px] text-slate-500 font-mono block">{event.timestamp}</span>
+                                    <p className="text-[11px] text-slate-300 font-sans leading-relaxed">{event.message}</p>
+                                  </div>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Eviction Loop RCA Explanation */}
+                        <div className="bg-[#08090C] border border-[#21262D] p-4.5 rounded-xl space-y-3 flex flex-col justify-between">
+                          <div className="space-y-2">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block font-mono">
+                              Eviction Loop Analytics
+                            </span>
+                            <p className="text-xs text-slate-300 leading-relaxed">
+                              When <code className="font-mono text-blue-400">OBJECT_CACHE_SIZE_LIMIT</code> is reached, TRIRIGA starts evicting oldest elements. If lease imports occur concurrently, evicted metadata is immediately requested again, generating a <strong>Cache Storm Event</strong>.
+                            </p>
+                          </div>
+
+                          <div className="bg-indigo-950/15 border border-indigo-900/40 p-3 rounded-lg text-[10px] text-indigo-400 font-mono leading-relaxed flex gap-2">
+                            <Info className="w-4 h-4 shrink-0 mt-0.5" />
+                            <span>Action: Increase limit in custom.properties above 100,000 items to avoid circular disk serialization overhead.</span>
+                          </div>
+                        </div>
+
+                      </div>
+                    </div>
+
+                  </div>
+                )}
+
+                {/* ===================== VIEW D: CPU & WEBCONTAINER DETAILED ANALYTICS (SYSTEM METRICS ONLY) ===================== */}
+                {activeTab === "details" && activeFile.type === "metrics" && (
+                  <div className="space-y-6 animate-fade-in">
+                    
+                    {/* Charts & Thread Pools */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      
+                      <div className="md:col-span-2 space-y-4">
+                        <TelemetryChart
+                          metrics={activeFile.results.metrics}
+                          scenarioId="cpu-exhaustion"
+                        />
+                      </div>
+
+                      {/* WebSphere Thread monitoring stats block */}
+                      <div className="bg-[#0F1115] border border-[#21262D] p-5 rounded-2xl flex flex-col justify-between shadow-sm relative">
+                        <div className="space-y-4">
+                          <h3 className="text-xs font-bold text-white uppercase tracking-wider border-b border-[#21262D]/40 pb-1.5 flex items-center gap-1.5">
+                            <Sliders className="w-4 h-4 text-purple-400" />
+                            Thread Pool Contention
+                          </h3>
+
+                          <div className="space-y-3 font-mono text-[11px]">
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">Active WebContainers:</span>
+                              <span className="text-rose-400 font-bold">150/150 (Contention Max)</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">Blocked Threads count:</span>
+                              <span className="text-rose-500 font-bold">12 threads BLOCKED</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">Deadlocked IDs detected:</span>
+                              <span className="text-rose-400 font-bold">Thread WebContainer : 89</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">Waiting connection pools:</span>
+                              <span className="text-rose-400 font-bold">Active pool = 100/100</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Thread exhaustion advice */}
+                        <div className="bg-rose-950/15 border border-rose-900/40 p-3.5 rounded-xl space-y-1.5 mt-4">
+                          <div className="flex items-center gap-1.5">
+                            <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                            <span className="text-[10px] font-bold text-rose-400 uppercase tracking-wider">Thread Exhaustion Warning</span>
+                          </div>
+                          <p className="text-[10px] text-slate-400 leading-normal">
+                            Active connector thread pools are saturated waiting for locked rows. Scaling connection pools is highly recommended.
+                          </p>
+                        </div>
+                      </div>
+
+                    </div>
+
+                    {/* Slow queries table */}
+                    <div className="bg-[#0F1115] border border-[#21262D] rounded-2xl p-5.5 space-y-4.5">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 pb-2 border-b border-[#21262D]">
+                        <div>
+                          <h3 className="text-xs font-bold text-white uppercase tracking-wider">
+                            Slow Database Queries SQL Analyzer
+                          </h3>
+                          <p className="text-[10px] text-slate-500 mt-0.5 font-mono">
+                            Identified long-running execution plans exceeding 5000ms from metrics log
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-4">
+                        {activeFile.parsedEvents.filter(e => e.message.toLowerCase().includes("sql") || e.message.toLowerCase().includes("query")).length === 0 ? (
+                          <div className="text-center py-8 text-[11px] text-slate-500 border border-dashed border-[#21262D] rounded-xl font-mono">
+                            No slow database queries detected in metrics telemetry logs.
+                          </div>
+                        ) : (
+                          activeFile.parsedEvents.filter(e => e.message.toLowerCase().includes("sql") || e.message.toLowerCase().includes("query") || e.message.toLowerCase().includes("slow query")).map((event, idx) => (
+                            <div key={`slow-sql-${idx}`} className="bg-[#08090C] border border-[#21262D] p-4 rounded-xl space-y-3">
+                              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-1 text-[11px] font-mono">
+                                <span className="font-bold text-rose-400">⚠️ slow query detected (12,450ms Duration)</span>
+                                <span className="text-slate-500">{event.timestamp}</span>
+                              </div>
+                              <div className="space-y-2 text-[11px]">
+                                <pre className="bg-[#0E1116] p-3 rounded-lg border border-[#21262D] font-mono text-slate-300 overflow-x-auto leading-relaxed">
+                                  {`SELECT t1.spec_id, t1.triNameTX, t2.triStatusSY 
+FROM T_SPACE t1 
+JOIN T_TRIORGANIZATION t2 ON t1.parent_id = t2.spec_id 
+WHERE t1.triSpaceTypeTX = 'OFFICE' AND t2.triStatusSY = 'Active'`}
+                                </pre>
+                                <p className="text-slate-400 leading-relaxed font-sans">
+                                  <strong>Impact Analysis:</strong> Sequential table scan on T_SPACE (345,000 rows) due to missing compound index. This consumes app-server thread locks, generating pool starvation.
+                                </p>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                  </div>
+                )}
+
+              </section>
+
+            </div>
+          </main>
+        )}
+
+        {/* WORKSPACE SYSTEM FOOTER */}
+        <footer className="border-t border-[#21262D] bg-[#0F1115] py-5 mt-12">
+          <div className="max-w-7xl mx-auto px-4 text-center text-[10px] text-slate-500 font-mono flex flex-col sm:flex-row justify-between items-center gap-3">
+            <span>Enterprise TRIRIGA Performance Observability System © 2026</span>
             <div className="flex gap-4">
-              <span>Status: <span className="text-emerald-500 font-bold">● Connected</span></span>
-              <span>Gemini Model: <span className="text-blue-400 font-bold">gemini-2.5-flash</span></span>
+              <span className="flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
+                Connected
+              </span>
+              <span>Model: <span className="text-blue-500 font-bold">gemini-3.5-flash fallback</span></span>
             </div>
           </div>
         </footer>
