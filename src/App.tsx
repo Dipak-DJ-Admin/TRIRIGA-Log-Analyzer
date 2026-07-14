@@ -470,6 +470,20 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* Performance Warning Notice */}
+                <div className="bg-amber-950/10 border border-amber-500/20 text-amber-300 rounded-2xl p-4 text-[11px] leading-relaxed flex gap-3 animate-fade-in">
+                  <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold text-slate-200 block mb-1">Sandbox Performance & Memory Limit Advisory</span>
+                    This diagnostic tool is engineered to execute <strong className="text-white">entirely offline within your local browser sandbox</strong>. Since your sensitive application telemetry never leaves your device, file processing speeds depend entirely on your client machine's processing capabilities and browser-allocated heap limits.
+                    <div className="mt-2 text-slate-400">
+                      • <strong className="text-amber-400/90">Small to Mid-Size Logs (&lt; 30MB)</strong>: Processed in milliseconds. Batch uploads of up to 30 files are automatically accelerated using multi-file dynamic thread optimization.<br />
+                      • <strong className="text-amber-400/90">Large Logs (50MB - 500MB+)</strong>: May cause transient page freezes as the V8 engine handles large file reads. We recommend splitting huge files before uploading.<br />
+                      • <strong className="text-rose-400/90">Massive Logs (1GB - 50GB+)</strong>: Browser sandboxes do not support gigabyte-level client-side heap structures. If you attempt to load multi-gigabyte server dumps, the browser tab may crash. Please use the targeted paste box below to analyze key incident segments instead.
+                    </div>
+                  </div>
+                </div>
+
                 {/* Paste Log Text Direct Option */}
                 <div className="bg-[#0F1115] border border-[#21262D] rounded-2xl p-5 space-y-3">
                   <div className="flex justify-between items-center">
