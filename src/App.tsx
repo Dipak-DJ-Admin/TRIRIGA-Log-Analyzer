@@ -35,11 +35,14 @@ import { CopilotAnalysis, AlertFilter } from "./types";
 import { sampleScenarios } from "./sampleLogs";
 import TelemetryChart from "./components/TelemetryChart";
 import MetricCard from "./components/MetricCard";
+import PerformanceAnalyzer from "./components/PerformanceAnalyzer";
+import PerformanceRunCreator from "./components/PerformanceRunCreator";
 import {
   parseLogsLocally,
   parseLogEvents,
   extractLogDetails,
   classifyLogType,
+  generatePerformanceData,
   ParsedEvent
 } from "./utils/logParser";
 
@@ -68,7 +71,12 @@ export default function App() {
   // Search & Filter state for the dashboard
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [alertFilter, setAlertFilter] = useState<AlertFilter>("ALL");
-  const [activeTab, setActiveTab] = useState<"overview" | "details" | "tuning">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "details" | "tuning" | "summary" | "resultDetails">("overview");
+  const [activePage, setActivePage] = useState<"upload" | "performance" | "system" | "security">("performance");
+  const [showPerfRunCreator, setShowPerfRunCreator] = useState<boolean>(false);
+  const [expandedSummaryCategories, setExpandedSummaryCategories] = useState<Record<string, boolean>>({});
+  const [detailSearch, setDetailSearch] = useState<string>("");
+  const [selectedCatFilter, setSelectedCatFilter] = useState<string>("ALL");
 
   // Selection states for log event details in server log table
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
@@ -136,6 +144,7 @@ export default function App() {
     if (processingIndex >= filesToProcess.length) {
       // Completed all processing!
       setAppState("dashboard");
+      setActivePage("performance");
       setFilesToProcess([]);
       setProcessingIndex(0);
       setProcessingProgress(0);
@@ -300,6 +309,81 @@ export default function App() {
       }
       return filtered;
     });
+  };
+
+  const handleCreateVirtualPerformanceRun = (selectedIds: string[]) => {
+    const categoryIdMap: Record<string, string> = {
+      "cba": "Connector for Business Applications",
+      "extFormula": "Extended Formula",
+      "extFormulaCalc": "Extended Formula - Calculation",
+      "extFormulaCalcNormal": "Extended Formula - Calculation - Normal",
+      "extFormulaCalcLabels": "Extended Formula - Calculation - Add Object Labels",
+      "extFormulaQueue": "Extended Formula - Queue",
+      "report": "Report",
+      "sql": "SQL",
+      "sqlNormal": "SQL - Normal",
+      "sqlBind": "SQL - Add Bind Variables",
+      "birt": "BIRT",
+      "stateTransition": "State Transition",
+      "workflow": "Workflow",
+      "workflowAsync": "Workflow - Asynchronous",
+      "workflowSync": "Workflow - Synchronous",
+      "workflowStep": "Workflow - Step Trace",
+      "cad": "CAD Integrator (Server)"
+    };
+
+    const selectedCategories = selectedIds
+      .map(id => categoryIdMap[id])
+      .filter(Boolean);
+
+    // Generate performance run logs
+    const perfData = generatePerformanceData(selectedCategories);
+
+    const fileId = `perf-run-${Date.now()}`;
+    const newFile: AnalyzedFile = {
+      id: fileId,
+      name: `Performance Run - ${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`,
+      size: perfData.details.length * 150,
+      type: "performance",
+      content: "Virtual performance telemetry run data.",
+      lineCount: perfData.details.length + 10,
+      dateRange: `${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`,
+      duration: "Captured Duration Run",
+      results: {
+        status: "Healthy",
+        executiveSummary: `Successfully completed a custom TRIRIGA performance timing trace. Captured ${perfData.details.length} detailed trace points across ${selectedCategories.length} active monitoring categories.`,
+        detectedAnomalies: [],
+        metrics: {
+          cpuMax: 24.5,
+          memoryTrend: "Stable",
+          memoryLeakRisk: "Low",
+          cacheMissRatio: 4.2,
+          workflowFailureRate: 0.0,
+          totalWorkflowsProcessed: 120,
+          totalWorkflowsFailed: 0,
+          avgResponseTimeMs: 145
+        },
+        rca: "### Custom Run Executed Successfully\n\nNo issues found in this run.",
+        recommendations: [],
+        performanceSummary: perfData.summary,
+        performanceDetails: perfData.details,
+        selectedCategories: selectedCategories
+      },
+      parsedEvents: perfData.details.map((det, idx) => ({
+        id: `ev-run-${idx}`,
+        timestamp: det.timestamp,
+        level: "INFO",
+        logger: "PerformanceTimings",
+        message: `[Performance Timings][${det.category}][${det.name}] Duration: ${det.durationMs}ms`,
+        details: det.details
+      }))
+    };
+
+    setAnalyzedFiles(prev => [newFile, ...prev]);
+    setActiveFileId(fileId);
+    setShowPerfRunCreator(false);
+    setActivePage("performance");
+    setActiveTab("summary"); // Go directly to Result Summary
   };
 
   // Group files by type to check for duplicates
@@ -770,6 +854,33 @@ export default function App() {
     triggerDownload(csv, `${file.name.replace(/\.[^/.]+$/, "")}_diagnostics_results.csv`, "text/csv");
   };
 
+  const handleExportSummaryCSV = (file: AnalyzedFile) => {
+    const summaryEntries = file.results.performanceSummary || [];
+    if (summaryEntries.length === 0) return;
+
+    let csvContent = "Category,Entry Name,Execution Count,Average Time (ms),Max Time (ms),Total Duration (ms)\n";
+
+    const grouped: Record<string, typeof summaryEntries> = {};
+    summaryEntries.forEach(entry => {
+      if (!grouped[entry.category]) {
+        grouped[entry.category] = [];
+      }
+      grouped[entry.category].push(entry);
+    });
+
+    Object.keys(grouped).forEach(category => {
+      const categoryEntries = grouped[category];
+      const isExpanded = expandedSummaryCategories[category];
+      const visibleEntries = isExpanded ? categoryEntries : categoryEntries.slice(0, 5);
+
+      visibleEntries.forEach(entry => {
+        csvContent += `"${entry.category.replace(/"/g, '""')}","${entry.name.replace(/"/g, '""')}",${entry.executionCount},${entry.avgTimeMs},${entry.maxTimeMs},${entry.totalTimeMs}\n`;
+      });
+    });
+
+    triggerDownload(csvContent, "Performance_Summary_Export.csv", "text/csv");
+  };
+
   // 4. Export Markdown (Combined)
   const handleExportMarkdownCombined = (type: "server" | "performance" | "metrics") => {
     const typeFiles = filesByType[type] || [];
@@ -838,6 +949,180 @@ export default function App() {
     const totalProcessed = typeFiles.reduce((acc, f) => acc + (f.results.metrics.totalWorkflowsProcessed || 0), 0);
     const totalFailed = typeFiles.reduce((acc, f) => acc + (f.results.metrics.totalWorkflowsFailed || 0), 0);
     const aggWorkflowFailRate = totalProcessed > 0 ? (totalFailed / totalProcessed) * 100 : 2.5;
+
+    // Calculate aggregated summaries for the export if type is performance
+    let performanceSection = "";
+    if (type === "performance") {
+      const sqlMap = new Map();
+      typeFiles.forEach(f => {
+        (f.results.sqlSummary || []).forEach(item => {
+          const existing = sqlMap.get(item.sqlText);
+          if (existing) {
+            existing.executionCount += item.executionCount;
+            existing.totalTimeMs += item.totalTimeMs;
+            existing.maxTimeMs = Math.max(existing.maxTimeMs, item.maxTimeMs);
+          } else {
+            sqlMap.set(item.sqlText, { ...item });
+          }
+        });
+      });
+      const combinedSql = Array.from(sqlMap.values()).map(item => ({
+        ...item,
+        avgTimeMs: item.executionCount > 0 ? Math.round(item.totalTimeMs / item.executionCount) : 0
+      })).sort((a: any, b: any) => b.totalTimeMs - a.totalTimeMs);
+
+      const wfMap = new Map();
+      typeFiles.forEach(f => {
+        (f.results.workflowSummary || []).forEach(item => {
+          const existing = wfMap.get(item.workflowName);
+          if (existing) {
+            existing.executionCount += item.executionCount;
+            existing.totalTimeMs += item.totalTimeMs;
+            existing.maxTimeMs = Math.max(existing.maxTimeMs, item.maxTimeMs);
+          } else {
+            wfMap.set(item.workflowName, { ...item });
+          }
+        });
+      });
+      const combinedWf = Array.from(wfMap.values()).map(item => ({
+        ...item,
+        avgTimeMs: item.executionCount > 0 ? Math.round(item.totalTimeMs / item.executionCount) : 0
+      })).sort((a: any, b: any) => b.totalTimeMs - a.totalTimeMs);
+
+      const webMap = new Map();
+      typeFiles.forEach(f => {
+        (f.results.webRequestSummary || []).forEach(item => {
+          const existing = webMap.get(item.urlOrAction);
+          if (existing) {
+            existing.executionCount += item.executionCount;
+            existing.totalTimeMs += item.totalTimeMs;
+            existing.maxTimeMs = Math.max(existing.maxTimeMs, item.maxTimeMs);
+          } else {
+            webMap.set(item.urlOrAction, { ...item });
+          }
+        });
+      });
+      const combinedWeb = Array.from(webMap.values()).map(item => ({
+        ...item,
+        avgTimeMs: item.executionCount > 0 ? Math.round(item.totalTimeMs / item.executionCount) : 0
+      })).sort((a: any, b: any) => b.totalTimeMs - a.totalTimeMs);
+
+      performanceSection = `
+    <!-- Performance Analyzer Summary Section -->
+    <div class="bg-[#161B22] border border-[#30363D] p-6 rounded-2xl space-y-6">
+      <div class="border-b border-[#30363D] pb-3 flex items-center gap-2">
+        <i data-lucide="cpu" class="w-5 h-5 text-indigo-400"></i>
+        <h2 class="text-base font-extrabold text-white">III. Consolidated Performance Analyzer Summaries</h2>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-mono">
+        <div class="bg-[#0D1117] border border-[#21262D] p-4 rounded-xl">
+          <span class="text-slate-500 block font-sans">Total Extracted SQL Time</span>
+          <span class="text-lg font-bold text-indigo-400">${(combinedSql.reduce((sum, i) => sum + i.totalTimeMs, 0) / 1000).toFixed(2)}s</span>
+        </div>
+        <div class="bg-[#0D1117] border border-[#21262D] p-4 rounded-xl">
+          <span class="text-slate-500 block font-sans">Total Workflow Execution Time</span>
+          <span class="text-lg font-bold text-emerald-400">${(combinedWf.reduce((sum, i) => sum + i.totalTimeMs, 0) / 1000).toFixed(2)}s</span>
+        </div>
+        <div class="bg-[#0D1117] border border-[#21262D] p-4 rounded-xl">
+          <span class="text-slate-500 block font-sans">Total Web Server Response Time</span>
+          <span class="text-lg font-bold text-blue-400">${(combinedWeb.reduce((sum, i) => sum + i.totalTimeMs, 0) / 1000).toFixed(2)}s</span>
+        </div>
+      </div>
+
+      <div class="space-y-6">
+        <!-- SQL Table -->
+        <div class="space-y-2">
+          <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest font-mono">Top SQL Executions (by Total Time)</h3>
+          <div class="overflow-x-auto border border-[#21262D] rounded-xl bg-[#0D1117]">
+            <table class="w-full text-left border-collapse text-[11px] font-mono">
+              <thead>
+                <tr class="bg-[#161B22] border-b border-[#21262D] text-slate-400">
+                  <th class="py-2.5 px-4">SQL Statement Query</th>
+                  <th class="py-2.5 px-4 text-right">Count</th>
+                  <th class="py-2.5 px-4 text-right">Avg Time</th>
+                  <th class="py-2.5 px-4 text-right">Max Time</th>
+                  <th class="py-2.5 px-4 text-right">Total Duration</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-[#21262D] text-slate-300">
+                ${combinedSql.slice(0, 5).map(item => `
+                  <tr class="hover:bg-slate-900/40">
+                    <td class="py-2.5 px-4 text-indigo-300 truncate max-w-md select-all" title="${item.sqlText}">${item.sqlText}</td>
+                    <td class="py-2.5 px-4 text-right text-white font-bold">${item.executionCount.toLocaleString()}</td>
+                    <td class="py-2.5 px-4 text-right">${item.avgTimeMs >= 1000 ? (item.avgTimeMs/1000).toFixed(2) + 's' : item.avgTimeMs + 'ms'}</td>
+                    <td class="py-2.5 px-4 text-right">${item.maxTimeMs >= 1000 ? (item.maxTimeMs/1000).toFixed(1) + 's' : item.maxTimeMs + 'ms'}</td>
+                    <td class="py-2.5 px-4 text-right text-indigo-400 font-bold">${item.totalTimeMs >= 1000 ? (item.totalTimeMs/1000).toFixed(1) + 's' : item.totalTimeMs + 'ms'}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Workflow Table -->
+        <div class="space-y-2 pt-2">
+          <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest font-mono">Top Workflow Executions</h3>
+          <div class="overflow-x-auto border border-[#21262D] rounded-xl bg-[#0D1117]">
+            <table class="w-full text-left border-collapse text-[11px] font-mono">
+              <thead>
+                <tr class="bg-[#161B22] border-b border-[#21262D] text-slate-400">
+                  <th class="py-2.5 px-4">Workflow Name</th>
+                  <th class="py-2.5 px-4">Module / Object</th>
+                  <th class="py-2.5 px-4 text-right">Count</th>
+                  <th class="py-2.5 px-4 text-right">Avg Time</th>
+                  <th class="py-2.5 px-4 text-right">Max Time</th>
+                  <th class="py-2.5 px-4 text-right">Total Duration</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-[#21262D] text-slate-300">
+                ${combinedWf.slice(0, 5).map(item => `
+                  <tr class="hover:bg-slate-900/40">
+                    <td class="py-2.5 px-4 text-emerald-400 font-bold font-sans">${item.workflowName}</td>
+                    <td class="py-2.5 px-4 text-slate-500">${item.module} / ${item.objectType}</td>
+                    <td class="py-2.5 px-4 text-right text-white font-bold">${item.executionCount.toLocaleString()}</td>
+                    <td class="py-2.5 px-4 text-right">${item.avgTimeMs >= 1000 ? (item.avgTimeMs/1000).toFixed(2) + 's' : item.avgTimeMs + 'ms'}</td>
+                    <td class="py-2.5 px-4 text-right">${item.maxTimeMs >= 1000 ? (item.maxTimeMs/1000).toFixed(1) + 's' : item.maxTimeMs + 'ms'}</td>
+                    <td class="py-2.5 px-4 text-right text-emerald-400 font-bold">${item.totalTimeMs >= 1000 ? (item.totalTimeMs/1000).toFixed(1) + 's' : item.totalTimeMs + 'ms'}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Web requests Table -->
+        <div class="space-y-2 pt-2">
+          <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest font-mono">Top HTTP Web Requests</h3>
+          <div class="overflow-x-auto border border-[#21262D] rounded-xl bg-[#0D1117]">
+            <table class="w-full text-left border-collapse text-[11px] font-mono">
+              <thead>
+                <tr class="bg-[#161B22] border-b border-[#21262D] text-slate-400">
+                  <th class="py-2.5 px-4">Action URL</th>
+                  <th class="py-2.5 px-4 text-right">Count</th>
+                  <th class="py-2.5 px-4 text-right">Avg Time</th>
+                  <th class="py-2.5 px-4 text-right">Max Time</th>
+                  <th class="py-2.5 px-4 text-right">Total Duration</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-[#21262D] text-slate-300">
+                ${combinedWeb.slice(0, 5).map(item => `
+                  <tr class="hover:bg-slate-900/40">
+                    <td class="py-2.5 px-4 text-blue-400 font-sans truncate max-w-md" title="${item.urlOrAction}">${item.urlOrAction}</td>
+                    <td class="py-2.5 px-4 text-right text-white font-bold">${item.executionCount.toLocaleString()}</td>
+                    <td class="py-2.5 px-4 text-right">${item.avgTimeMs >= 1000 ? (item.avgTimeMs/1000).toFixed(2) + 's' : item.avgTimeMs + 'ms'}</td>
+                    <td class="py-2.5 px-4 text-right">${item.maxTimeMs >= 1000 ? (item.maxTimeMs/1000).toFixed(1) + 's' : item.maxTimeMs + 'ms'}</td>
+                    <td class="py-2.5 px-4 text-right text-blue-400 font-bold">${item.totalTimeMs >= 1000 ? (item.totalTimeMs/1000).toFixed(1) + 's' : item.totalTimeMs + 'ms'}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+      `;
+    }
 
     let htmlContent = `<!DOCTYPE html>
 <html lang="en">
@@ -987,6 +1272,8 @@ export default function App() {
       </div>
     </div>
 
+    ${performanceSection}
+
     <footer class="text-center text-xs text-slate-500 font-mono py-8">
       IBM TRIRIGA Diagnostics • Standalone Offline Interactive HTML Cluster Exporter • Generated at ${new Date().toLocaleString()}
     </footer>
@@ -1108,11 +1395,11 @@ export default function App() {
             {appState === "dashboard" && (
               <div className="hidden md:flex items-center gap-2">
                 <button
-                  onClick={() => setAppState("upload")}
+                  onClick={() => setActivePage("upload")}
                   className="px-3 py-1.5 bg-[#1B2028] hover:bg-[#21262D] text-slate-300 hover:text-white border border-[#2D333B] rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  Upload More Files
+                  Upload & Simulation
                 </button>
                 <button
                   onClick={() => {
@@ -1120,6 +1407,7 @@ export default function App() {
                     setActiveFileId(null);
                     setActiveCombinedType(null);
                     setAppState("upload");
+                    setActivePage("upload");
                   }}
                   className="px-3 py-1.5 bg-rose-950/20 hover:bg-rose-950/40 text-rose-400 hover:text-rose-300 border border-rose-900/40 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
                 >
@@ -1130,6 +1418,60 @@ export default function App() {
             )}
           </div>
         </header>
+
+        {/* ======================= TOP PAGE NAVIGATION TABS ======================= */}
+        {appState === "dashboard" && (
+          <div className="bg-[#0F1115] border-b border-[#21262D] sticky top-[64px] z-40">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+              <div className="flex space-x-6 overflow-x-auto scrollbar-none">
+                <button
+                  onClick={() => setActivePage("upload")}
+                  className={`py-3.5 text-xs font-bold px-1 border-b-2 transition-all cursor-pointer flex items-center gap-2 whitespace-nowrap ${
+                    activePage === "upload"
+                      ? "border-blue-500 text-white"
+                      : "border-transparent text-slate-400 hover:text-white"
+                  }`}
+                >
+                  <Upload className="w-3.5 h-3.5 text-blue-400" />
+                  1. Upload & Simulation
+                </button>
+                <button
+                  onClick={() => setActivePage("performance")}
+                  className={`py-3.5 text-xs font-bold px-1 border-b-2 transition-all cursor-pointer flex items-center gap-2 whitespace-nowrap ${
+                    activePage === "performance"
+                      ? "border-blue-500 text-white"
+                      : "border-transparent text-slate-400 hover:text-white"
+                  }`}
+                >
+                  <Activity className="w-3.5 h-3.5 text-emerald-400" />
+                  2. TRIRIGA Performance
+                </button>
+                <button
+                  onClick={() => setActivePage("system")}
+                  className={`py-3.5 text-xs font-bold px-1 border-b-2 transition-all cursor-pointer flex items-center gap-2 whitespace-nowrap ${
+                    activePage === "system"
+                      ? "border-blue-500 text-white"
+                      : "border-transparent text-slate-400 hover:text-white"
+                  }`}
+                >
+                  <Sliders className="w-3.5 h-3.5 text-purple-400" />
+                  3. System Metrics
+                </button>
+                <button
+                  onClick={() => setActivePage("security")}
+                  className={`py-3.5 text-xs font-bold px-1 border-b-2 transition-all cursor-pointer flex items-center gap-2 whitespace-nowrap ${
+                    activePage === "security"
+                      ? "border-blue-500 text-white"
+                      : "border-transparent text-slate-400 hover:text-white"
+                  }`}
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+                  4. Security Audits
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ======================= PHASE 1: UPLOAD PORTAL ======================= */}
         {appState === "upload" && (
@@ -1440,7 +1782,137 @@ export default function App() {
 
         {/* ======================= PHASE 3: DIAGNOSTICS DASHBOARD ======================= */}
         {appState === "dashboard" && (activeFile || activeCombinedType) && (
-          <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          activePage === "upload" ? (
+            <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 animate-fade-in">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* UPLOADER & TEXT BOX */}
+                <div className="lg:col-span-2 space-y-6">
+                  <div
+                    id="drop-zone"
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                    onClick={() => document.getElementById("dashboard-file-input")?.click()}
+                    className={`border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-all duration-300 ${
+                      isDragging ? "border-blue-500 bg-blue-950/15" : "border-[#30363D] bg-[#0F1115] hover:border-blue-500/40"
+                    }`}
+                  >
+                    <input
+                      type="file"
+                      id="dashboard-file-input"
+                      multiple
+                      onChange={(e) => handleFilesSelected(e.target.files)}
+                      className="hidden"
+                    />
+                    <div className="space-y-3 pointer-events-none">
+                      <div className="w-10 h-10 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center mx-auto text-blue-500">
+                        <Upload className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-slate-200">Upload additional TRIRIGA log files</p>
+                        <p className="text-[11px] text-slate-400 mt-1">Drag and drop server.log, gc.log or performance streams here</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-[#0F1115] border border-[#21262D] rounded-2xl p-5 space-y-3">
+                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Code className="w-3.5 h-3.5 text-blue-400" />
+                      Paste raw log segment
+                    </span>
+                    <textarea
+                      rows={4}
+                      value={pastedText}
+                      onChange={(e) => setPastedText(e.target.value)}
+                      placeholder="Paste log entries here to trigger deterministic parsing..."
+                      className="w-full bg-[#08090C] text-slate-300 rounded-xl p-3.5 font-mono text-[11px] border border-[#21262D] focus:outline-none focus:ring-1 focus:ring-blue-500 leading-relaxed resize-none"
+                    />
+                    <div className="flex justify-end">
+                      <button
+                        onClick={handleAnalyzePastedText}
+                        disabled={!pastedText.trim()}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-md"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        Analyze Pasted Stream
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="bg-[#0F1115] border border-[#21262D] rounded-2xl p-5 space-y-4">
+                    <h3 className="text-xs font-bold text-white uppercase tracking-wider">Currently Loaded Logs ({analyzedFiles.length})</h3>
+                    <div className="divide-y divide-[#21262D] max-h-[220px] overflow-y-auto pr-1">
+                      {analyzedFiles.map((file) => (
+                        <div key={`workspace-${file.id}`} className="py-2.5 flex justify-between items-center">
+                          <div className="space-y-0.5">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-bold text-slate-200">{file.name}</span>
+                              <span className="text-[8px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1 py-0.25 rounded font-mono font-bold uppercase">{file.type}</span>
+                            </div>
+                            <div className="text-[10px] text-slate-500 font-mono">{(file.size/1024).toFixed(1)} KB • {file.lineCount} lines</div>
+                          </div>
+                          <button
+                            onClick={(e) => handleRemoveFile(file.id, e)}
+                            className="p-1 text-slate-500 hover:text-rose-400 hover:bg-rose-950/10 rounded transition-all"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* SIMULATOR & PRESETS */}
+                <div className="space-y-6">
+                  <div className="bg-[#0F1115] border border-[#21262D] rounded-2xl p-5 space-y-4">
+                    <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                      <Activity className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+                      Timing Trace Simulator
+                    </h3>
+                    <p className="text-[10px] text-slate-500 leading-relaxed">Configure individual TRIRIGA performance timings and run a live tracing execution simulation to generate a timing report file.</p>
+                    <button
+                      onClick={() => setShowPerfRunCreator(true)}
+                      className="w-full py-2.5 px-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Launch Performance Simulator
+                    </button>
+                  </div>
+
+                  <div className="bg-[#0F1115] border border-[#21262D] rounded-2xl p-5 space-y-4">
+                    <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider">Quick Load Presets</h3>
+                    <div className="space-y-2">
+                      <button onClick={() => handleLoadPresets("all")} className="w-full text-left p-3 bg-blue-900/10 hover:bg-blue-900/20 border border-blue-800/30 rounded-xl flex justify-between items-center group transition-all cursor-pointer">
+                        <span className="text-xs font-bold text-slate-200">Load All 4 Preset Streams</span>
+                        <ChevronRight className="w-4 h-4 text-blue-500" />
+                      </button>
+                      <button onClick={() => handleLoadPresets("server")} className="w-full text-left p-2.5 bg-[#1B2028]/30 hover:bg-[#1B2028]/60 border border-[#21262D] rounded-xl flex justify-between items-center text-xs text-slate-300 cursor-pointer">
+                        <span>tririga_server_error.log</span>
+                        <ChevronRight className="w-3.5 h-3.5 text-slate-600" />
+                      </button>
+                      <button onClick={() => handleLoadPresets("gc")} className="w-full text-left p-2.5 bg-[#1B2028]/30 hover:bg-[#1B2028]/60 border border-[#21262D] rounded-xl flex justify-between items-center text-xs text-slate-300 cursor-pointer">
+                        <span>ibm_websphere_g1gc_metrics.log</span>
+                        <ChevronRight className="w-3.5 h-3.5 text-slate-600" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {showPerfRunCreator && (
+                <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+                  <div className="max-w-3xl w-full">
+                    <PerformanceRunCreator
+                      onCancel={() => setShowPerfRunCreator(false)}
+                      onFinish={handleCreateVirtualPerformanceRun}
+                    />
+                  </div>
+                </div>
+              )}
+            </main>
+          ) : (
+            <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
             
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
               
@@ -1529,6 +2001,17 @@ export default function App() {
                       );
                     })}
                   </div>
+
+                  <button
+                    onClick={() => {
+                      setShowPerfRunCreator(true);
+                      setActiveCombinedType(null); // Clear combined view
+                    }}
+                    className="w-full mt-1.5 py-2 px-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-emerald-500/20"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Generate Performance Run
+                  </button>
 
                   {/* Consolidated multi-log trigger option */}
                   {duplicateTypes.length > 0 && (
@@ -1621,8 +2104,12 @@ export default function App() {
 
               {/* MAIN PORTAL AREA: ISOLATED REPORTS AND LOG DETAIL VIEWS */}
               <section className="lg:col-span-3 space-y-6">
-                
-                {!activeCombinedType ? (
+                {showPerfRunCreator ? (
+                  <PerformanceRunCreator
+                    onCancel={() => setShowPerfRunCreator(false)}
+                    onFinish={handleCreateVirtualPerformanceRun}
+                  />
+                ) : !activeCombinedType ? (
                   <>
                     {/* ACTIVE FILE SPECIFIC REPORT HEADER CARD */}
                     <div className="bg-[#0F1115] border border-[#21262D] p-5.5 rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-sm relative">
@@ -1766,63 +2253,60 @@ export default function App() {
                 </div>
 
                 {/* DYNAMIC TAB CONTROLS (Hiding unavailable views per file type!) */}
-                <div className="flex border-b border-[#21262D] pb-0">
-                  <button
-                    onClick={() => setActiveTab("overview")}
-                    className={`pb-3 text-xs font-semibold px-4 border-b-2 transition-all cursor-pointer ${
-                      activeTab === "overview"
-                        ? "border-blue-500 text-white"
-                        : "border-transparent text-slate-400 hover:text-white"
-                    }`}
-                  >
-                    Executive Overview
-                  </button>
-                  
-                  {/* Dynamic Tab 2: Server Logs Details (ONLY accessible for server logs!) */}
-                  {activeFile.type === "server" && (
-                    <button
-                      onClick={() => setActiveTab("details")}
-                      className={`pb-3 text-xs font-semibold px-4 border-b-2 transition-all cursor-pointer ${
-                        activeTab === "details"
-                          ? "border-blue-500 text-white"
-                          : "border-transparent text-slate-400 hover:text-white"
-                      }`}
-                    >
-                      Server Trace Details
-                    </button>
-                  )}
-
-                  {/* Dynamic Tab 2: JVM Performance & GC (ONLY accessible for performance logs!) */}
-                  {activeFile.type === "performance" && (
-                    <button
-                      onClick={() => setActiveTab("details")}
-                      className={`pb-3 text-xs font-semibold px-4 border-b-2 transition-all cursor-pointer ${
-                        activeTab === "details"
-                          ? "border-blue-500 text-white"
-                          : "border-transparent text-slate-400 hover:text-white"
-                      }`}
-                    >
-                      JVM Heap & Cache Miss Detailed Analytics
-                    </button>
-                  )}
-
-                  {/* Dynamic Tab 2: System Metrics (ONLY accessible for metrics logs!) */}
-                  {activeFile.type === "metrics" && (
-                    <button
-                      onClick={() => setActiveTab("details")}
-                      className={`pb-3 text-xs font-semibold px-4 border-b-2 transition-all cursor-pointer ${
-                        activeTab === "details"
-                          ? "border-blue-500 text-white"
-                          : "border-transparent text-slate-400 hover:text-white"
-                      }`}
-                    >
-                      CPU & WebContainer Detailed Analytics
-                    </button>
-                  )}
-                </div>
+                {activePage === "performance" && (
+                  <div className="flex border-b border-[#21262D] pb-0">
+                    {activeFile.type === "performance" ? (
+                      <>
+                        <button
+                          onClick={() => setActiveTab("summary")}
+                          className={`pb-3 text-xs font-semibold px-4 border-b-2 transition-all cursor-pointer ${
+                            activeTab === "summary" || activeTab === "overview"
+                              ? "border-blue-500 text-white"
+                              : "border-transparent text-slate-400 hover:text-white"
+                          }`}
+                        >
+                          Result Summary
+                        </button>
+                        <button
+                          onClick={() => setActiveTab("resultDetails")}
+                          className={`pb-3 text-xs font-semibold px-4 border-b-2 transition-all cursor-pointer ${
+                            activeTab === "resultDetails"
+                              ? "border-blue-500 text-white"
+                              : "border-transparent text-slate-400 hover:text-white"
+                          }`}
+                        >
+                          Result Details
+                        </button>
+                      </>
+                    ) : activeFile.type === "server" ? (
+                      <>
+                        <button
+                          onClick={() => setActiveTab("overview")}
+                          className={`pb-3 text-xs font-semibold px-4 border-b-2 transition-all cursor-pointer ${
+                            activeTab === "overview" || activeTab === "summary"
+                              ? "border-blue-500 text-white"
+                              : "border-transparent text-slate-400 hover:text-white"
+                          }`}
+                        >
+                          Transaction Latency Analytics
+                        </button>
+                        <button
+                          onClick={() => setActiveTab("details")}
+                          className={`pb-3 text-xs font-semibold px-4 border-b-2 transition-all cursor-pointer ${
+                            activeTab === "details"
+                              ? "border-blue-500 text-white"
+                              : "border-transparent text-slate-400 hover:text-white"
+                          }`}
+                        >
+                          Server Trace Details
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
+                )}
 
                 {/* ===================== VIEW A: EXECUTIVE OVERVIEW (AVAILABLE TO ALL FILE TYPES) ===================== */}
-                {activeTab === "overview" && (
+                {(activePage === "security" || (activePage === "performance" && activeFile.type === "server" && activeTab === "overview")) && (
                   <div className="space-y-6 animate-fade-in">
                     
                     {/* Summary row */}
@@ -2134,7 +2618,7 @@ export default function App() {
                 )}
 
                 {/* ===================== VIEW B: SERVER TRACE DETAILS (SERVER LOGS ONLY) ===================== */}
-                {activeTab === "details" && activeFile.type === "server" && (
+                {activeTab === "details" && activePage === "performance" && activeFile.type === "server" && (
                   <div className="space-y-6 animate-fade-in">
                     
                     {/* Database & Workflow Contention Summary cards */}
@@ -2248,8 +2732,259 @@ export default function App() {
                   </div>
                 )}
 
+                {/* ===================== VIEW B-1: PERFORMANCE RESULT SUMMARY ===================== */}
+                {activeTab === "summary" && activePage === "performance" && activeFile.type === "performance" && (
+                  <div className="space-y-6 animate-fade-in">
+                    
+                    {/* Header Controls */}
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-[#0F1115] border border-[#21262D] p-5.5 rounded-2xl">
+                      <div>
+                        <h3 className="text-base font-extrabold text-white tracking-tight flex items-center gap-2">
+                          <Activity className="w-5 h-5 text-indigo-400" />
+                          Performance Result Summary
+                        </h3>
+                        <p className="text-xs text-slate-400 mt-1">
+                          Consolidated call averages. Displaying the longest-running transaction entries for each selected category.
+                        </p>
+                      </div>
+
+                      <button
+                        onClick={() => handleExportSummaryCSV(activeFile)}
+                        className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold shadow-md transition-all flex items-center gap-2 cursor-pointer"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        Export Summary (CSV)
+                      </button>
+                    </div>
+
+                    {/* Counts Explanation Banner */}
+                    <div className="bg-[#161B22]/65 border border-indigo-900/30 p-4 rounded-xl flex gap-3 text-xs leading-relaxed text-slate-300">
+                      <Info className="w-5 h-5 text-indigo-400 shrink-0 mt-0.5" />
+                      <div className="space-y-1">
+                        <span className="font-bold text-white block">Unique Count Aggregates vs Raw Details</span>
+                        <p className="text-[11px] text-slate-400">
+                          The total counts on the <strong>Result Summary</strong> tab represent <strong>unique aggregated counts</strong> (entries grouped by name with calculated average, max, and sum durations). The <strong>Result Details</strong> tab counts <strong>every single raw transaction record individually</strong>.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Grouped Category Summaries */}
+                    {(() => {
+                      const summaryEntries = activeFile.results.performanceSummary || [];
+                      if (summaryEntries.length === 0) {
+                        return (
+                          <div className="text-center py-12 bg-[#0F1115] border border-dashed border-[#21262D] rounded-2xl text-slate-500">
+                            No performance summary timing records captured for this file.
+                          </div>
+                        );
+                      }
+
+                      // Group summary entries by category
+                      const grouped: Record<string, typeof summaryEntries> = {};
+                      summaryEntries.forEach(entry => {
+                        if (!grouped[entry.category]) {
+                          grouped[entry.category] = [];
+                        }
+                        grouped[entry.category].push(entry);
+                      });
+
+                      return (
+                        <div className="space-y-6">
+                          {Object.keys(grouped).map(category => {
+                            const entries = grouped[category];
+                            const isExpanded = expandedSummaryCategories[category];
+                            const visibleEntries = isExpanded ? entries : entries.slice(0, 5);
+
+                            return (
+                              <div key={`summary-cat-${category}`} className="bg-[#0F1115] border border-[#21262D] rounded-2xl p-5 space-y-4">
+                                <div className="flex justify-between items-center border-b border-[#21262D] pb-3">
+                                  <div className="space-y-0.5">
+                                    <h4 className="text-xs font-extrabold text-white uppercase tracking-wider font-mono">
+                                      {category}
+                                    </h4>
+                                    <span className="text-[10px] text-slate-500 block">
+                                      {entries.length} unique transaction profiles identified
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div className="overflow-x-auto">
+                                  <table className="w-full text-left border-collapse text-xs font-mono">
+                                    <thead>
+                                      <tr className="border-b border-[#21262D]/60 text-slate-500 bg-[#161B22]/30">
+                                        <th className="py-2.5 px-3 font-semibold text-slate-400 font-sans">Entry / Profile Name</th>
+                                        <th className="py-2.5 px-3 text-right font-semibold text-slate-400">Execution Count</th>
+                                        <th className="py-2.5 px-3 text-right font-semibold text-slate-400">Avg Time</th>
+                                        <th className="py-2.5 px-3 text-right font-semibold text-slate-400">Max Time</th>
+                                        <th className="py-2.5 px-3 text-right font-semibold text-indigo-400">Total Duration</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-[#161B22]/50 text-[11px]">
+                                      {visibleEntries.map((entry, idx) => (
+                                        <tr key={`${category}-entry-${idx}`} className="hover:bg-[#161B22]/20">
+                                          <td className="py-2.5 px-3 text-slate-300 font-medium font-sans">
+                                            {entry.name}
+                                          </td>
+                                          <td className="py-2.5 px-3 text-right text-slate-400">
+                                            {entry.executionCount.toLocaleString()}
+                                          </td>
+                                          <td className="py-2.5 px-3 text-right text-slate-300 font-bold">
+                                            {entry.avgTimeMs >= 1000 ? `${(entry.avgTimeMs / 1000).toFixed(2)}s` : `${entry.avgTimeMs}ms`}
+                                          </td>
+                                          <td className="py-2.5 px-3 text-right text-slate-500">
+                                            {entry.maxTimeMs >= 1000 ? `${(entry.maxTimeMs / 1000).toFixed(1)}s` : `${entry.maxTimeMs}ms`}
+                                          </td>
+                                          <td className="py-2.5 px-3 text-right text-indigo-400 font-bold">
+                                            {entry.totalTimeMs >= 1000 ? `${(entry.totalTimeMs / 1000).toFixed(2)}s` : `${entry.totalTimeMs}ms`}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+
+                                {entries.length > 5 && (
+                                  <div className="flex justify-center border-t border-[#21262D]/50 pt-2.5">
+                                    <button
+                                      onClick={() => setExpandedSummaryCategories(prev => ({
+                                        ...prev,
+                                        [category]: !prev[category]
+                                      }))}
+                                      className="text-[10px] font-bold text-slate-400 hover:text-white flex items-center gap-1 transition-all cursor-pointer font-mono"
+                                    >
+                                      {isExpanded ? (
+                                        <>
+                                          <ChevronDown className="w-3.5 h-3.5 rotate-180" />
+                                          Show top 5
+                                        </>
+                                      ) : (
+                                        <>
+                                          <ChevronDown className="w-3.5 h-3.5" />
+                                          Show all ({entries.length} profiles)
+                                        </>
+                                      )}
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+
+                  </div>
+                )}
+
+                {/* ===================== VIEW B-2: PERFORMANCE RESULT DETAILS ===================== */}
+                {activeTab === "resultDetails" && activePage === "performance" && activeFile.type === "performance" && (
+                  <div className="space-y-6 animate-fade-in">
+                    
+                    {/* Header and Counters */}
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-[#0F1115] border border-[#21262D] p-5.5 rounded-2xl">
+                      <div>
+                        <h3 className="text-base font-extrabold text-white tracking-tight flex items-center gap-2">
+                          <FileText className="w-5 h-5 text-emerald-400" />
+                          Performance Result Details
+                        </h3>
+                        <p className="text-xs text-slate-400 mt-1">
+                          Comprehensive individual call-stack timings. Displaying every captured transaction record independently.
+                        </p>
+                      </div>
+
+                      <div className="px-4 py-2 bg-[#161B22] border border-[#21262D] rounded-xl text-xs font-mono font-bold text-slate-400">
+                        Total Records: <span className="text-emerald-400">{(activeFile.results.performanceDetails || []).length} lines</span>
+                      </div>
+                    </div>
+
+                    {/* Details Table Card */}
+                    <div className="bg-[#0F1115] border border-[#21262D] rounded-2xl p-5 space-y-4">
+                      {/* Search Filter for Details */}
+                      {(() => {
+                        const allCategories = Array.from(new Set((activeFile.results.performanceDetails || []).map(d => d.category)));
+
+                        const filteredDetails = (activeFile.results.performanceDetails || []).filter(item => {
+                          const matchesSearch = item.name.toLowerCase().includes(detailSearch.toLowerCase()) || 
+                                                (item.details && item.details.toLowerCase().includes(detailSearch.toLowerCase()));
+                          const matchesCat = selectedCatFilter === "ALL" || item.category === selectedCatFilter;
+                          return matchesSearch && matchesCat;
+                        });
+
+                        return (
+                          <>
+                            <div className="flex flex-col sm:flex-row gap-3">
+                              <input
+                                type="text"
+                                placeholder="Search transaction details..."
+                                value={detailSearch}
+                                onChange={e => setDetailSearch(e.target.value)}
+                                className="flex-1 bg-[#161B22] border border-[#30363D] rounded-xl px-4 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
+                              />
+
+                              <select
+                                value={selectedCatFilter}
+                                onChange={e => setSelectedCatFilter(e.target.value)}
+                                className="bg-[#161B22] border border-[#30363D] rounded-xl px-3 py-2 text-xs text-slate-300 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
+                              >
+                                <option value="ALL">All Categories</option>
+                                {allCategories.map(cat => (
+                                  <option key={`opt-cat-${cat}`} value={cat}>{cat}</option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className="overflow-x-auto border border-[#21262D] rounded-xl">
+                              <table className="w-full text-left border-collapse text-xs font-mono">
+                                <thead>
+                                  <tr className="border-b border-[#21262D] text-slate-400 bg-[#161B22]/50">
+                                    <th className="py-2.5 px-3 font-semibold text-slate-400 font-sans">Timestamp</th>
+                                    <th className="py-2.5 px-3 font-semibold text-slate-400 font-sans">Category</th>
+                                    <th className="py-2.5 px-3 font-semibold text-slate-400 font-sans">Transaction Name / Query</th>
+                                    <th className="py-2.5 px-3 text-right font-semibold text-slate-400 font-sans">Duration</th>
+                                    <th className="py-2.5 px-3 font-semibold text-slate-400 font-sans hidden md:table-cell">Details / Context</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-[#161B22] text-[11px]">
+                                  {filteredDetails.length === 0 ? (
+                                    <tr>
+                                      <td colSpan={5} className="py-8 text-center text-slate-500 font-sans">
+                                        No individual trace rows match your filter.
+                                      </td>
+                                    </tr>
+                                  ) : (
+                                    filteredDetails.map((det, idx) => (
+                                      <tr key={`det-row-${idx}`} className="hover:bg-[#161B22]/30">
+                                        <td className="py-2.5 px-3 text-slate-500 whitespace-nowrap">
+                                          {det.timestamp}
+                                        </td>
+                                        <td className="py-2.5 px-3 text-slate-400 font-semibold whitespace-nowrap text-[10px] uppercase font-mono tracking-wide">
+                                          {det.category}
+                                        </td>
+                                        <td className="py-2.5 px-3 text-slate-200 select-all font-sans leading-relaxed">
+                                          {det.name}
+                                        </td>
+                                        <td className="py-2.5 px-3 text-right text-emerald-400 font-bold whitespace-nowrap">
+                                          {det.durationMs >= 1000 ? `${(det.durationMs / 1000).toFixed(2)}s` : `${det.durationMs}ms`}
+                                        </td>
+                                        <td className="py-2.5 px-3 text-slate-500 truncate max-w-xs hidden md:table-cell">
+                                          {det.details || "N/A"}
+                                        </td>
+                                      </tr>
+                                    ))
+                                  )}
+                                </tbody>
+                              </table>
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+
+                  </div>
+                )}
+
                 {/* ===================== VIEW C: JVM HEAP & CACHE DETAILED ANALYTICS (PERFORMANCE ONLY) ===================== */}
-                {activeTab === "details" && activeFile.type === "performance" && (
+                {activePage === "system" && (
                   <div className="space-y-6 animate-fade-in">
                     
                     {/* Heap Charts */}
@@ -2365,11 +3100,19 @@ export default function App() {
                       </div>
                     </div>
 
+                    {/* Performance Analyzer tables section */}
+                    <PerformanceAnalyzer
+                      sqlSummary={activeFile.results.sqlSummary}
+                      workflowSummary={activeFile.results.workflowSummary}
+                      webRequestSummary={activeFile.results.webRequestSummary}
+                      fileName={activeFile.name}
+                    />
+
                   </div>
                 )}
 
                 {/* ===================== VIEW D: CPU & WEBCONTAINER DETAILED ANALYTICS (SYSTEM METRICS ONLY) ===================== */}
-                {activeTab === "details" && activeFile.type === "metrics" && (
+                {activePage === "system" && activeFile.type === "metrics" && (
                   <div className="space-y-6 animate-fade-in">
                     
                     {/* Charts & Thread Pools */}
@@ -2596,31 +3339,33 @@ WHERE t1.triSpaceTypeTX = 'OFFICE' AND t2.triStatusSY = 'Active'`}
                 </div>
 
                 {/* COMBINED TAB CONTROLS */}
-                <div className="flex border-b border-[#21262D] pb-0">
-                  <button
-                    onClick={() => setCombinedTab("overview")}
-                    className={`pb-3 text-xs font-semibold px-4 border-b-2 transition-all cursor-pointer ${
-                      combinedTab === "overview"
-                        ? "border-blue-500 text-white"
-                        : "border-transparent text-slate-400 hover:text-white"
-                    }`}
-                  >
-                    Consolidated Insights
-                  </button>
-                  <button
-                    onClick={() => setCombinedTab("timeline")}
-                    className={`pb-3 text-xs font-semibold px-4 border-b-2 transition-all cursor-pointer ${
-                      combinedTab === "timeline"
-                        ? "border-blue-500 text-white"
-                        : "border-transparent text-slate-400 hover:text-white"
-                    }`}
-                  >
-                    Chronological Multi-Node Timeline Explorer
-                  </button>
-                </div>
+                {activePage === "performance" && (
+                  <div className="flex border-b border-[#21262D] pb-0">
+                    <button
+                      onClick={() => setCombinedTab("overview")}
+                      className={`pb-3 text-xs font-semibold px-4 border-b-2 transition-all cursor-pointer ${
+                        combinedTab === "overview"
+                          ? "border-blue-500 text-white"
+                          : "border-transparent text-slate-400 hover:text-white"
+                      }`}
+                    >
+                      Consolidated Insights
+                    </button>
+                    <button
+                      onClick={() => setCombinedTab("timeline")}
+                      className={`pb-3 text-xs font-semibold px-4 border-b-2 transition-all cursor-pointer ${
+                        combinedTab === "timeline"
+                          ? "border-blue-500 text-white"
+                          : "border-transparent text-slate-400 hover:text-white"
+                      }`}
+                    >
+                      Chronological Multi-Node Timeline Explorer
+                    </button>
+                  </div>
+                )}
 
                 {/* TAB A: CONSOLIDATED INSIGHTS */}
-                {combinedTab === "overview" && (
+                {(activePage === "security" || (activePage === "performance" && combinedTab === "overview")) && (
                   <div className="space-y-6 animate-fade-in">
                     
                     {/* COMBINED EXECUTIVE SUMMARY */}
@@ -2903,11 +3648,86 @@ WHERE t1.triSpaceTypeTX = 'OFFICE' AND t2.triStatusSY = 'Active'`}
 
                     </div>
 
+                    {/* Consolidated Cluster Performance Analyzer for combined Performance Logs */}
+                    {(() => {
+                      const typeFiles = (activeCombinedType && filesByType[activeCombinedType]) || [];
+                      if (activeCombinedType !== "performance" || typeFiles.length === 0) return null;
+
+                      // Aggregate SQL summaries
+                      const sqlMap = new Map<string, { sqlText: string, executionCount: number, totalTimeMs: number, maxTimeMs: number }>();
+                      typeFiles.forEach(f => {
+                        (f.results.sqlSummary || []).forEach(item => {
+                          const existing = sqlMap.get(item.sqlText);
+                          if (existing) {
+                            existing.executionCount += item.executionCount;
+                            existing.totalTimeMs += item.totalTimeMs;
+                            existing.maxTimeMs = Math.max(existing.maxTimeMs, item.maxTimeMs);
+                          } else {
+                            sqlMap.set(item.sqlText, { ...item });
+                          }
+                        });
+                      });
+                      const combinedSqlSummary = Array.from(sqlMap.values()).map(item => ({
+                        ...item,
+                        avgTimeMs: item.executionCount > 0 ? Math.round(item.totalTimeMs / item.executionCount) : 0
+                      }));
+
+                      // Aggregate Workflow summaries
+                      const wfMap = new Map<string, { workflowName: string, module: string, objectType: string, executionCount: number, totalTimeMs: number, maxTimeMs: number }>();
+                      typeFiles.forEach(f => {
+                        (f.results.workflowSummary || []).forEach(item => {
+                          const existing = wfMap.get(item.workflowName);
+                          if (existing) {
+                            existing.executionCount += item.executionCount;
+                            existing.totalTimeMs += item.totalTimeMs;
+                            existing.maxTimeMs = Math.max(existing.maxTimeMs, item.maxTimeMs);
+                          } else {
+                            wfMap.set(item.workflowName, { ...item });
+                          }
+                        });
+                      });
+                      const combinedWfSummary = Array.from(wfMap.values()).map(item => ({
+                        ...item,
+                        avgTimeMs: item.executionCount > 0 ? Math.round(item.totalTimeMs / item.executionCount) : 0
+                      }));
+
+                      // Aggregate Web Request summaries
+                      const webMap = new Map<string, { urlOrAction: string, executionCount: number, totalTimeMs: number, maxTimeMs: number }>();
+                      typeFiles.forEach(f => {
+                        (f.results.webRequestSummary || []).forEach(item => {
+                          const existing = webMap.get(item.urlOrAction);
+                          if (existing) {
+                            existing.executionCount += item.executionCount;
+                            existing.totalTimeMs += item.totalTimeMs;
+                            existing.maxTimeMs = Math.max(existing.maxTimeMs, item.maxTimeMs);
+                          } else {
+                            webMap.set(item.urlOrAction, { ...item });
+                          }
+                        });
+                      });
+                      const combinedWebSummary = Array.from(webMap.values()).map(item => ({
+                        ...item,
+                        avgTimeMs: item.executionCount > 0 ? Math.round(item.totalTimeMs / item.executionCount) : 0
+                      }));
+
+                      return (
+                        <div className="mt-6">
+                          <PerformanceAnalyzer
+                            sqlSummary={combinedSqlSummary}
+                            workflowSummary={combinedWfSummary}
+                            webRequestSummary={combinedWebSummary}
+                            fileName={`${typeFiles.length} Clustered Nodes`}
+                            isCombined={true}
+                          />
+                        </div>
+                      );
+                    })()}
+
                   </div>
                 )}
 
                 {/* TAB B: CHRONOLOGICAL MULTI-NODE TIMELINE */}
-                {combinedTab === "timeline" && (
+                {combinedTab === "timeline" && activePage === "performance" && (
                   <div className="bg-[#0F1115] border border-[#21262D] rounded-2xl overflow-hidden shadow-sm animate-fade-in space-y-0">
                     
                     {/* Timeline Header and Controls */}
@@ -3055,6 +3875,7 @@ WHERE t1.triSpaceTypeTX = 'OFFICE' AND t2.triStatusSY = 'Active'`}
 
             </div>
           </main>
+          )
         )}
 
         {/* WORKSPACE SYSTEM FOOTER */}

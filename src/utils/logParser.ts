@@ -1,4 +1,4 @@
-import { CopilotAnalysis, Anomaly, Recommendation } from "../types";
+import { CopilotAnalysis, Anomaly, Recommendation, SqlExecution, WorkflowExecution, WebRequestExecution, PerformanceSummaryEntry, PerformanceDetailEntry } from "../types";
 
 export interface ParsedEvent {
   id: string;
@@ -322,6 +322,285 @@ export function parseLogsLocally(logText: string, scenarioName?: string): Copilo
     rca = `### Root Cause Analysis: Optimal Platform Health\n\n1. **GC Cycles**: JVM Heap recovered smoothly during minor GC. No memory retention issues found.\n2. **Cache Operations**: Classification, GUI, and Metadata caches are running optimally. Cache Miss Ratio is well within the 5% warning margin.`;
   }
 
+  // Generate high-fidelity Performance Analyzer Runs and Logs tables matching IBM TRIRIGA standard outputs
+  let sqlSummary: SqlExecution[] = [];
+  let workflowSummary: WorkflowExecution[] = [];
+  let webRequestSummary: WebRequestExecution[] = [];
+
+  const isCpuSpike = (cpuMax !== null && cpuMax >= 80) || (scenarioName && (scenarioName.includes("CPU") || scenarioName.includes("Exhaustion")));
+  const isMemLeak = (memoryLeakRisk === "High") || (scenarioName && (scenarioName.includes("JVM") || scenarioName.includes("Memory")));
+  const isCacheStorm = (cacheMissRatio !== null && cacheMissRatio > 15) || (scenarioName && scenarioName.includes("Cache"));
+  const isWorkflowDeadlock = (workflowFailureRate !== null && workflowFailureRate > 2) || (scenarioName && (scenarioName.includes("Workflow") || scenarioName.includes("Lock")));
+
+  if (isCpuSpike) {
+    sqlSummary = [
+      {
+        sqlText: "SELECT t1.spec_id, t1.triNameTX, t2.triStatusSY FROM T_SPACE t1 JOIN T_TRIORGANIZATION t2 ON t1.parent_id = t2.spec_id WHERE t1.triSpaceTypeTX = 'OFFICE' AND t2.triStatusSY = 'Active'",
+        executionCount: 320,
+        totalTimeMs: 3984000,
+        avgTimeMs: 12450,
+        maxTimeMs: 18200
+      },
+      {
+        sqlText: "SELECT EVENT_ID, EVENT_NAME, WF_STATUS, CREATED_DATE FROM WF_EVENT_HISTORY WHERE WF_STATUS = 'LOCKED'",
+        executionCount: 1450,
+        totalTimeMs: 1160000,
+        avgTimeMs: 800,
+        maxTimeMs: 3400
+      },
+      {
+        sqlText: "SELECT t1.spec_id, t1.triNameTX, t3.triAreaNU FROM T_SPACE t1 JOIN T_TRIORGANIZATION t2 ON t1.parent_id = t2.spec_id JOIN T_SPACE_LEVEL3 t3 ON t1.spec_id = t3.spec_id WHERE t1.triSpaceClassTX = ?",
+        executionCount: 280,
+        totalTimeMs: 896000,
+        avgTimeMs: 3200,
+        maxTimeMs: 6800
+      },
+      {
+        sqlText: "UPDATE T_SPACE SET triStatusSY = ? WHERE spec_id = ?",
+        executionCount: 890,
+        totalTimeMs: 445000,
+        avgTimeMs: 500,
+        maxTimeMs: 3200
+      }
+    ];
+
+    workflowSummary = [
+      {
+        workflowName: "triSpaceAllocationCalculate",
+        module: "Space",
+        objectType: "triSpace",
+        executionCount: 210,
+        totalTimeMs: 2625000,
+        avgTimeMs: 12500,
+        maxTimeMs: 21000
+      },
+      {
+        workflowName: "triIntegrateSpace",
+        module: "Space",
+        objectType: "triSpace",
+        executionCount: 180,
+        totalTimeMs: 1440000,
+        avgTimeMs: 8000,
+        maxTimeMs: 15200
+      },
+      {
+        workflowName: "triCalculateSpaceAllocation",
+        module: "Space",
+        objectType: "triSpace",
+        executionCount: 820,
+        totalTimeMs: 1230000,
+        avgTimeMs: 1500,
+        maxTimeMs: 5400
+      }
+    ];
+
+    webRequestSummary = [
+      {
+        urlOrAction: "/html/en/default/rest/SpaceAllocation/calculate",
+        executionCount: 180,
+        totalTimeMs: 2160000,
+        avgTimeMs: 12000,
+        maxTimeMs: 19500
+      },
+      {
+        urlOrAction: "/portal/SpaceManagement/graphicsView",
+        executionCount: 450,
+        totalTimeMs: 1125000,
+        avgTimeMs: 2500,
+        maxTimeMs: 7800
+      }
+    ];
+  } else if (isMemLeak) {
+    sqlSummary = [
+      {
+        sqlText: "SELECT spec_id, section_name, content FROM T_GUI_METADATA WHERE portal_name = ?",
+        executionCount: 1200,
+        totalTimeMs: 600000,
+        avgTimeMs: 500,
+        maxTimeMs: 2400
+      },
+      {
+        sqlText: "SELECT object_data FROM T_RECORD_METADATA WHERE spec_template_id = ?",
+        executionCount: 8500,
+        totalTimeMs: 1700000,
+        avgTimeMs: 200,
+        maxTimeMs: 1800
+      },
+      {
+        sqlText: "SELECT spec_id, triNameTX FROM T_MY_CUSTOM_OBJECT WHERE triStatusSY = 'Active'",
+        executionCount: 520,
+        totalTimeMs: 416000,
+        avgTimeMs: 800,
+        maxTimeMs: 2100
+      }
+    ];
+
+    workflowSummary = [
+      {
+        workflowName: "triLeaseAdministrationBulkImport",
+        module: "Lease",
+        objectType: "triLease",
+        executionCount: 12,
+        totalTimeMs: 4800000,
+        avgTimeMs: 400000,
+        maxTimeMs: 920000
+      },
+      {
+        workflowName: "triContextScopeContainerBuilder",
+        module: "Platform",
+        objectType: "triSystem",
+        executionCount: 124500,
+        totalTimeMs: 2490000,
+        avgTimeMs: 20,
+        maxTimeMs: 1200
+      }
+    ];
+
+    webRequestSummary = [
+      {
+        urlOrAction: "/html/en/default/rest/LeaseImport/upload",
+        executionCount: 15,
+        totalTimeMs: 5400000,
+        avgTimeMs: 360000,
+        maxTimeMs: 890000
+      },
+      {
+        urlOrAction: "/portal/LeasePortfolio/summaryDashboard",
+        executionCount: 380,
+        totalTimeMs: 760000,
+        avgTimeMs: 2000,
+        maxTimeMs: 5400
+      }
+    ];
+  } else if (isCacheStorm) {
+    sqlSummary = [
+      {
+        sqlText: "SELECT spec_id, triNameTX FROM T_CLASSIFICATION WHERE hierarchy_path = 'triSpaceClass'",
+        executionCount: 142000,
+        totalTimeMs: 5680000,
+        avgTimeMs: 40,
+        maxTimeMs: 350
+      },
+      {
+        sqlText: "SELECT object_data, spec_template_id FROM T_RECORD_METADATA WHERE is_active = 1",
+        executionCount: 32000,
+        totalTimeMs: 1280000,
+        avgTimeMs: 40,
+        maxTimeMs: 410
+      }
+    ];
+
+    workflowSummary = [
+      {
+        workflowName: "triSpaceClassificationLookup",
+        module: "Space",
+        objectType: "triSpace",
+        executionCount: 24000,
+        totalTimeMs: 1200000,
+        avgTimeMs: 50,
+        maxTimeMs: 450
+      }
+    ];
+
+    webRequestSummary = [
+      {
+        urlOrAction: "/portal/SpaceManagement/lookupSpaceClassifications",
+        executionCount: 12000,
+        totalTimeMs: 1800000,
+        avgTimeMs: 150,
+        maxTimeMs: 980
+      }
+    ];
+  } else if (isWorkflowDeadlock) {
+    sqlSummary = [
+      {
+        sqlText: "SELECT * FROM T_WORK_ORDER WHERE spec_id = ? FOR UPDATE",
+        executionCount: 850,
+        totalTimeMs: 12750000,
+        avgTimeMs: 15000,
+        maxTimeMs: 15000
+      },
+      {
+        sqlText: "UPDATE T_WORK_ORDER SET triStatusCL = ? WHERE spec_id = ?",
+        executionCount: 850,
+        totalTimeMs: 850000,
+        avgTimeMs: 1000,
+        maxTimeMs: 4200
+      }
+    ];
+
+    workflowSummary = [
+      {
+        workflowName: "triCalculateSpaceAllocation",
+        module: "Space",
+        objectType: "triSpace",
+        executionCount: 850,
+        totalTimeMs: 12800000,
+        avgTimeMs: 15058,
+        maxTimeMs: 15200
+      },
+      {
+        workflowName: "triUpdateSpaceRecord",
+        module: "Space",
+        objectType: "triSpace",
+        executionCount: 850,
+        totalTimeMs: 1700000,
+        avgTimeMs: 2000,
+        maxTimeMs: 5400
+      }
+    ];
+
+    webRequestSummary = [
+      {
+        urlOrAction: "/html/en/default/rest/WorkOrder/updateStatus",
+        executionCount: 850,
+        totalTimeMs: 12750000,
+        avgTimeMs: 15000,
+        maxTimeMs: 15000
+      }
+    ];
+  } else {
+    // Optimal / healthy
+    sqlSummary = [
+      {
+        sqlText: "SELECT spec_id, triNameTX FROM T_SPACE WHERE triStatusSY = 'Active'",
+        executionCount: 2500,
+        totalTimeMs: 50000,
+        avgTimeMs: 20,
+        maxTimeMs: 120
+      },
+      {
+        sqlText: "SELECT spec_id, section_name FROM T_GUI_METADATA WHERE spec_id = ?",
+        executionCount: 8200,
+        totalTimeMs: 41000,
+        avgTimeMs: 5,
+        maxTimeMs: 45
+      }
+    ];
+
+    workflowSummary = [
+      {
+        workflowName: "triSpaceStatusUpdate",
+        module: "Space",
+        objectType: "triSpace",
+        executionCount: 1500,
+        totalTimeMs: 120000,
+        avgTimeMs: 80,
+        maxTimeMs: 310
+      }
+    ];
+
+    webRequestSummary = [
+      {
+        urlOrAction: "/portal/SpaceManagement/activeList",
+        executionCount: 1200,
+        totalTimeMs: 144000,
+        avgTimeMs: 120,
+        maxTimeMs: 450
+      }
+    ];
+  }
+
   return {
     status,
     executiveSummary,
@@ -337,6 +616,202 @@ export function parseLogsLocally(logText: string, scenarioName?: string): Copilo
       avgResponseTimeMs: cpuMax !== null ? (cpuMax > 80 ? 3200 : 420) : null
     },
     rca,
-    recommendations
+    recommendations,
+    sqlSummary,
+    workflowSummary,
+    webRequestSummary,
+    performanceSummary: generatePerformanceData().summary,
+    performanceDetails: generatePerformanceData().details,
+    selectedCategories: [
+      "Report",
+      "Workflow - Asynchronous",
+      "Workflow - Synchronous",
+      "Workflow - Step Trace"
+    ]
   };
+}
+
+export function generatePerformanceData(selectedCategories?: string[]): {
+  summary: PerformanceSummaryEntry[];
+  details: PerformanceDetailEntry[];
+} {
+  const categoriesList = selectedCategories && selectedCategories.length > 0 
+    ? selectedCategories 
+    : [
+        "Report",
+        "Workflow - Asynchronous",
+        "Workflow - Synchronous",
+        "Workflow - Step Trace"
+      ];
+
+  const templates: Record<string, string[]> = {
+    "Connector for Business Applications": [
+      "Outbound CBA REST Space Sync",
+      "Inbound CBA SOAP Lease Create",
+      "CBA ESB ERP Queue Poll"
+    ],
+    "Extended Formula": [
+      "Extended Formula - Space GFA Calculation",
+      "Extended Formula - Lease Liability Evaluation"
+    ],
+    "Extended Formula - Calculation": [
+      "Extended Formula - Calc - Asset Depreciation",
+      "Extended Formula - Calc - Allocation Factor"
+    ],
+    "Extended Formula - Calculation - Normal": [
+      "Formula - Calc - Normal - Rent Payment",
+      "Formula - Calc - Normal - Opex Indexing"
+    ],
+    "Extended Formula - Calculation - Add Object Labels": [
+      "Formula - Calc - AddLabels - Location Hierarchy",
+      "Formula - Calc - AddLabels - Floor Level Mapping"
+    ],
+    "Extended Formula - Queue": [
+      "Extended Formula - Queue - Task Dispatch",
+      "Extended Formula - Queue - Allocation Queue Poll"
+    ],
+    "Report": [
+      "Report - Space Department Allocations",
+      "Report - Active Leases Critical Path",
+      "Report - Work Order SLA Breaches",
+      "Report - Asset Inventory Status",
+      "Report - Energy Consumption Utility"
+    ],
+    "SQL": [
+      "SQL - SELECT t1.spec_id FROM T_SPACE t1",
+      "SQL - SELECT spec_id, triNameTX FROM T_TRIORGANIZATION"
+    ],
+    "SQL - Normal": [
+      "SQL - Normal - UPDATE T_SPACE SET spec_template_id = 120",
+      "SQL - Normal - SELECT FROM T_WORK_ORDER",
+      "SQL - Normal - INSERT INTO T_LEASES_TEMP"
+    ],
+    "SQL - Add Bind Variables": [
+      "SQL - Bind - SELECT FROM WF_EVENT_HISTORY WHERE WF_STATUS = ?",
+      "SQL - Bind - SELECT FROM T_PROPERTY WHERE spec_id = ?",
+      "SQL - Bind - SELECT FROM T_ORGANIZATION WHERE parent_id = ?"
+    ],
+    "BIRT": [
+      "BIRT - Lease Accounting Disclosure Report",
+      "BIRT - Portfolio Financial Forecasting PDF",
+      "BIRT - Space Utilization Heatmap"
+    ],
+    "State Transition": [
+      "State Transition - triSpace - Active to Retired",
+      "State Transition - triWorkOrder - Draft to Issued",
+      "State Transition - triLease - Review to Approved"
+    ],
+    "Workflow": [
+      "Workflow - triSpaceAllocationCalculate",
+      "Workflow - triWorkOrderAutoDispatch"
+    ],
+    "Workflow - Asynchronous": [
+      "Workflow - Async - triSpaceStatusUpdate",
+      "Workflow - Async - triPropertyReconciliation",
+      "Workflow - Async - triAssetTagAssignment",
+      "Workflow - Async - triLeaseAmortizationCalc",
+      "Workflow - Async - triTenantNotificationAlert",
+      "Workflow - Async - triCostCenterDistribution"
+    ],
+    "Workflow - Synchronous": [
+      "Workflow - Sync - triSpaceValidateName",
+      "Workflow - Sync - triContractValidateRent",
+      "Workflow - Sync - triWorkOrderCheckStatus"
+    ],
+    "Workflow - Step Trace": [
+      "Step Trace - triSpaceStatusUpdate - Step 4: Query Space Class",
+      "Step Trace - triWorkOrderAutoDispatch - Step 12: Trigger SLA Alert",
+      "Step Trace - triLeaseAmortizationCalc - Step 2: Sum Rent Payments"
+    ],
+    "CAD Integrator (Server)": [
+      "CAD Integrator - DXF Floor plan Publish",
+      "CAD Integrator - AutoCAD Layer Mapping Sync",
+      "CAD Integrator - Polylines Area Calculation"
+    ]
+  };
+
+  const details: PerformanceDetailEntry[] = [];
+  let idCounter = 1;
+
+  const means: Record<string, number> = {
+    "Connector for Business Applications": 450,
+    "Extended Formula": 1200,
+    "Extended Formula - Calculation": 850,
+    "Extended Formula - Calculation - Normal": 380,
+    "Extended Formula - Calculation - Add Object Labels": 520,
+    "Extended Formula - Queue": 150,
+    "Report": 3500,
+    "SQL": 120,
+    "SQL - Normal": 85,
+    "SQL - Add Bind Variables": 45,
+    "BIRT": 8500,
+    "State Transition": 340,
+    "Workflow": 950,
+    "Workflow - Asynchronous": 1200,
+    "Workflow - Synchronous": 280,
+    "Workflow - Step Trace": 65,
+    "CAD Integrator (Server)": 2400
+  };
+
+  const now = new Date();
+
+  categoriesList.forEach(category => {
+    const entryNames = templates[category] || [`Generic entry for ${category}`];
+    const mean = means[category] || 300;
+
+    entryNames.forEach(name => {
+      // If it is SQL or Workflow - Async, let's generate more rows to allow "Show all / Show top 5" checks
+      // The user wants at least one category with more than 5 entries (e.g. Workflow - Asynchronous has 6 entries)
+      const count = name.includes("SQL") || name.includes("Step Trace")
+        ? Math.floor(Math.random() * 8) + 5  // 5 to 12 times
+        : Math.floor(Math.random() * 4) + 1;  // 1 to 4 times
+
+      for (let i = 0; i < count; i++) {
+        const variance = (Math.random() * 0.4 - 0.2) * mean;
+        const durationMs = Math.max(1, Math.round(mean + variance));
+        
+        const timestampOffsetSeconds = Math.floor(Math.random() * 1200);
+        const entryTime = new Date(now.getTime() - timestampOffsetSeconds * 1000);
+
+        details.push({
+          id: `perf-det-${idCounter++}`,
+          category,
+          name,
+          durationMs,
+          timestamp: entryTime.toISOString().replace("T", " ").substring(0, 19),
+          details: `Executed by thread ${Math.floor(Math.random() * 10) + 10} on Node ${String.fromCharCode(65 + Math.floor(Math.random() * 3))}`
+        });
+      }
+    });
+  });
+
+  const summaryMap = new Map<string, PerformanceSummaryEntry>();
+  details.forEach(det => {
+    const key = `${det.category}|||${det.name}`;
+    const existing = summaryMap.get(key);
+    if (existing) {
+      existing.executionCount += 1;
+      existing.totalTimeMs += det.durationMs;
+      existing.maxTimeMs = Math.max(existing.maxTimeMs, det.durationMs);
+    } else {
+      summaryMap.set(key, {
+        category: det.category,
+        name: det.name,
+        executionCount: 1,
+        totalTimeMs: det.durationMs,
+        avgTimeMs: det.durationMs,
+        maxTimeMs: det.durationMs
+      });
+    }
+  });
+
+  const summary = Array.from(summaryMap.values()).map(item => ({
+    ...item,
+    avgTimeMs: Math.round(item.totalTimeMs / item.executionCount)
+  }));
+
+  // Sort summary by average time descending
+  summary.sort((a, b) => b.avgTimeMs - a.avgTimeMs);
+
+  return { summary, details };
 }

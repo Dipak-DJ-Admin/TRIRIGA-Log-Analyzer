@@ -22,6 +22,50 @@ export interface PlatformMetrics {
   avgResponseTimeMs: number | null;
 }
 
+export interface SqlExecution {
+  sqlText: string;
+  executionCount: number;
+  totalTimeMs: number;
+  avgTimeMs: number;
+  maxTimeMs: number;
+}
+
+export interface WorkflowExecution {
+  workflowName: string;
+  module: string;
+  objectType: string;
+  executionCount: number;
+  totalTimeMs: number;
+  avgTimeMs: number;
+  maxTimeMs: number;
+}
+
+export interface WebRequestExecution {
+  urlOrAction: string;
+  executionCount: number;
+  totalTimeMs: number;
+  avgTimeMs: number;
+  maxTimeMs: number;
+}
+
+export interface PerformanceSummaryEntry {
+  category: string;
+  name: string;
+  executionCount: number;
+  totalTimeMs: number;
+  avgTimeMs: number;
+  maxTimeMs: number;
+}
+
+export interface PerformanceDetailEntry {
+  id: string;
+  category: string;
+  name: string;
+  durationMs: number;
+  timestamp: string;
+  details?: string;
+}
+
 export interface CopilotAnalysis {
   status: "Healthy" | "Degraded" | "Critical";
   executiveSummary: string;
@@ -30,6 +74,12 @@ export interface CopilotAnalysis {
   rca: string;
   recommendations: Recommendation[];
   isAI?: boolean;
+  sqlSummary?: SqlExecution[];
+  workflowSummary?: WorkflowExecution[];
+  webRequestSummary?: WebRequestExecution[];
+  performanceSummary?: PerformanceSummaryEntry[];
+  performanceDetails?: PerformanceDetailEntry[];
+  selectedCategories?: string[];
 }
 
 export type AlertFilter = "ALL" | "Critical" | "Warning" | "Info";
