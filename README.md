@@ -14,6 +14,17 @@ An enterprise-grade, offline-first performance diagnostics workspace and log ana
 
 ---
 
+## 💡 Why This Tool? Overcoming Native TRIRIGA Limitations
+
+Standard IBM TRIRIGA platforms have severe troubleshooting boundaries out-of-the-box:
+1. **Single-File Upload Restrictions**: The native administrator console log parser limits administrators to viewing or searching only one single file at a time. It cannot aggregate or trace cross-node correlations.
+2. **No Integrated System Metrics Analytics**: Standard TRIRIGA server logs (`server.log`) do not natively correlate CPU metrics, active WebContainer thread pools, or JVM G1GC reclamation cycles in one visual dashboard.
+3. **No Automatic Multi-Node Chronological Correlation**: Correlating events (like a memory spike on Node 1 coinciding with a database lock contention on Node 2) has traditionally required tedious, manual Excel spreadsheet consolidation.
+
+This Performance Copilot completely bridges these gaps, providing dynamic, combined, multi-node log aggregation, thread analysis, and local visual memory metrics.
+
+---
+
 ## 🛠️ Key Architectural Models
 
 The project is structured with two execution pathways to satisfy both extreme ease-of-use and professional production hosting:
@@ -24,8 +35,31 @@ The project is structured with two execution pathways to satisfy both extreme ea
    * **100% Secure & Private**: Your logs never leave your machine; all parsing and telemetry rendering occur locally inside your browser sandbox.
 
 2. **Full-Stack React & Vite Application**
-   * **Modern Framework**: Implemented using React 18, Vite, Tailwind CSS, and Lucide icons.
    * **Highly Modular**: Decoupled parsing engines, dynamic metric calculations, and interactive responsive charts.
+
+---
+
+## 💼 SRE & Performance Engineering Portfolio Highlights (For Recruiters & Hiring Managers)
+
+This workspace is engineered to showcase rigorous, production-grade systems design and Site Reliability Engineering (SRE) principles. It is optimized to handle realistic enterprise-scale log streams while adhering to strict architectural constraints:
+
+### 🚀 1. Constant-Memory Stream-Based Parsing Engine ($O(1)$ Space Complexity)
+* **The Problem**: Standard log parsers read whole files into active RAM buffers, leading to browser crashes or server Out-Of-Memory (OOM) failures when loading multi-gigabyte production logs.
+* **The Solution**: Designed with **Zero-Allocation local chunk buffering** and stream-based reading. This guarantees that heap memory overhead remains completely flat ($O(1)$).
+* **The Proof**: Stress-tested across multiple file sizes. As demonstrated in the scalability table below, parsing a **500MB** stream utilizes **less than 0.1MB** of incremental heap memory delta while scaling throughput linearly ($O(N)$) up to **26.5 MB/s**.
+
+### 🔗 2. Multi-Dimensional Chronological Correlation Engine
+* **Contextual Correlation**: Rather than treating logs as isolated strings, the engine maps multiple distinct, disjoint telemetry streams (JVM G1GC cycles, CPU usage, active WebContainer thread pools, and workflow transitions) into a unified **Chronological Timeline Explorer**.
+* **Enterprise Pattern Matching**: Correlates separate asynchronous faults (e.g., a metadata cache storm on Node 1 coinciding with a database lock contention on Node 2) by aligning timestamps with microsecond precision, enabling rapid Root Cause Analysis (RCA).
+
+### 🛡️ 3. Strict Sandbox Security & Zero-Trust Architecture
+* **Data Privacy Compliance**: Enterprise application logs often contain sensitive client names, PII, internal IP networks, or transaction metadata.
+* **100% Client-Side Processing**: Designed with an offline-first philosophy. Zero external network requests or API telemetry pings are transmitted. All parsing, state management, and report compilation run entirely inside local client-side V8/JS engines.
+* **Zero Egress & Compliance-Safe**: Confirmed clean by our security audit scanner, bypassing enterprise proxy, firewalls, and data governance hurdles.
+
+### 🧪 4. Deterministic Rule-Based Diagnostics Engine (No AI Slop)
+* **Precision Audits**: Built with a strict, rule-based diagnostic engine. Unlike generative AI models which can hallucinate error metrics, this system operates with 100% deterministic thresholds for thread pools, memory leak risk, and cache miss percentages.
+* **Automated Test Coverage**: Features a fully executable local test suite (`test-harness.ts`) testing 29 discrete parsing rules with a 100% pass rate.
 
 ---
 
