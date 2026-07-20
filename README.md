@@ -29,6 +29,32 @@ The project is structured with two execution pathways to satisfy both extreme ea
 
 ---
 
+## 🎛️ 4-Stage Diagnostics Workspace Layout
+
+The application organizes log telemetry and interactive troubleshooting tools into a logical, high-productivity tabbed interface designed for enterprise performance engineers:
+
+1. **1. Upload & Simulation (Active Portal)**
+   * **Dynamic File Uploader**: Drag & drop multiple `server.log`, `gc.log`, or performance streams concurrently.
+   * **Raw Stream Parser**: Clipboard text area to quickly paste log segments and execute on-the-fly deterministic parsing.
+   * **Timing Trace Simulator**: An interactive, high-fidelity tracing generator that allows engineers to custom-build synthetic TRIRIGA performance runs and export simulated log telemetry.
+   * **Quick Load Presets**: Instantly load pre-packaged cluster and JVM garbage collection datasets for demonstration and training.
+
+2. **2. TRIRIGA Performance**
+   * **Transaction Latency Analytics**: Deep insights into database lock contentions, metadata bottlenecks, and slow workflow executions.
+   * **Result Summary & Details**: Slices transaction traces by category (SQL, workflow, web request), presenting execution counts, average latency, and cumulative times with responsive bar/pie visualizations.
+   * **Chronological Multi-Node Timeline Explorer**: Unified cluster stream analysis that correlates disjoint exceptions and G1GC cycles across multiple nodes in one cohesive timeline view.
+
+3. **3. System Metrics**
+   * **JVM Heap & Cache Detailed Analytics**: Real-time JVM memory reclamation curves, Garbage Collection frequency, memory leak risk profiles, and metadata cache miss ratio donut charts.
+   * **CPU & WebContainer Thread Pool Analytics**: Dynamic visualization of CPU usage, active WebContainer thread pools, queue depths, and connection backlogs.
+
+4. **4. Security Audits**
+   * **Executive Compliance Auditing**: Immediate diagnostics score based on server exception ratios and cluster health.
+   * **Anomaly & Alerts Feed**: Intelligent notification feed aggregating detected warnings, severe stack traces, and thread contention alerts.
+   * **Security Vector Verification**: Checks for hardcoded secrets, XSS injection risks, CORS configurations, and data isolation controls.
+
+---
+
 ## ⚡ Scalable Log Analytics Engine (Batch 1 to 30+ Files)
 
 The diagnostics engine is engineered to handle large enterprise cluster deployments by supporting concurrent multi-file uploads:
