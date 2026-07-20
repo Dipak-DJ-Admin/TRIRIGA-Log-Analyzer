@@ -1,5 +1,7 @@
 # 📊 IBM TRIRIGA Observability & Performance Copilot
 
+**Lead Architect & Developer: Dipak Jagtap (Performance & SRE Engineering)**
+
 An enterprise-grade, offline-first performance diagnostics workspace and log analyzer designed specifically for **IBM TRIRIGA** application platforms. It identifies thread pool exhaustion, JVM memory leaks, cache miss storms, and database lock contentions instantly.
 
 ---
